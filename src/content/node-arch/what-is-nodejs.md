@@ -482,4 +482,4 @@ That's a mouthful, but every word matters.
 
 V8 makes it fast. `libuv` makes it asynchronous. The ecosystem gives it reach. Together, these three elements created a platform that fundamentally changed how we build for the web.
 
-Now that we have the 30,000-foot overview, it's time to zoom in. In the next chapter, we're going to get our hands dirty with one of the most fundamental I/O operations: working with the filesystem.
+Now that we have the 30,000-foot overview, it's time to zoom in. In the next chapter, we're going to get our hands dirty with one of the most fundamental concepts of Node.js - the v8 compiler (`Ignition`, `SparkPlug` and `Turbofan`).

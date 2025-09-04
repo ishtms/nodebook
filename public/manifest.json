@@ -55,10 +55,10 @@
   "prefer_related_applications": false,
   "shortcuts": [
     {
-      "name": "Start Learning",
-      "short_name": "Learn",
-      "description": "Start learning Node.js",
-      "url": "/chapters",
+      "name": "Start Reading",
+      "short_name": "Read",
+      "description": "Begin your Node.js deep dive",
+      "url": "/",
       "icons": [
         {
           "src": "/favicon-32x32.png",
@@ -69,7 +69,7 @@
     {
       "name": "Table of Contents",
       "short_name": "Contents",
-      "description": "View all chapters",
+      "description": "Browse all chapters",
       "url": "/#table-of-contents",
       "icons": [
         {

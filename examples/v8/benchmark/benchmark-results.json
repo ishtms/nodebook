@@ -1,0 +1,106 @@
+{
+  "metadata": {
+    "date": "2025-09-04T05:02:00.577Z",
+    "nodeVersion": "v22.4.1",
+    "v8Version": "12.4.254.21-node.15",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "results": {
+    "Hidden Classes": {
+      "propertyOrder": "10.19",
+      "dynamicAddition": "1.00",
+      "constructorVsFactory": "4.92",
+      "shapeTransitions": "1.50"
+    },
+    "Inline Caching": {
+      "poly2": "1.44",
+      "poly4": "1.44",
+      "megamorphic": "3.92",
+      "functionCalls": "1.06",
+      "methodLookup": "1.05"
+    },
+    "Monomorphic Patterns": {
+      "poly2": "1.29",
+      "poly4": "3.94",
+      "megamorphic": "6.15",
+      "arrayProcessing": "2.13",
+      "mapOperations": "1.36"
+    },
+    "Delete vs Undefined": {
+      "singleProperty": "7.25",
+      "multipleProperties": "67.24",
+      "dictionaryMode": "4.21",
+      "dynamicManagement": "1.69"
+    },
+    "Config Object Disaster": {
+      "dynamicConfig": "17.21",
+      "shapes10": "5.08",
+      "shapes50": "4.36",
+      "badPattern": "1.95",
+      "worstCase": "17.21"
+    },
+    "BigInt Deoptimization": {
+      "bigintVsNumber": "29.83",
+      "mixedTypes": "20.53",
+      "polymorphic": "8.22",
+      "deoptimization": "2.25",
+      "dispatcher": "1.21",
+      "realWorld": "0.65",
+      "worstCase": "20.53"
+    },
+    "Array Element Kinds": {
+      "double": "1.90",
+      "packed": "1.81",
+      "holeySmi": "1.58",
+      "holeyMixed": "2.19",
+      "dictionary": "139.67",
+      "nan": "1.00",
+      "infinity": "1.01"
+    },
+    "Deoptimization Triggers": {
+      "typeChanges": "20.64",
+      "hiddenClasses": "2.48",
+      "tryCatch": "0.95",
+      "arguments": "1.01",
+      "withStatement": "475.97",
+      "eval": "109.06",
+      "forcedDeopt": "1.03",
+      "worstCase": "475.97"
+    }
+  },
+  "claims": {
+    "hiddenClasses": {
+      "claim": "Unstable hidden classes: 2-5x slower",
+      "file": "hidden-classes-demo.js"
+    },
+    "inlineCaching": {
+      "claim": "Polymorphic (2): ~2x, Polymorphic (4): ~3-4x, Megamorphic: 10-50x slower",
+      "file": "inline-caching-states.js"
+    },
+    "monomorphicPatterns": {
+      "claim": "Polymorphic: 2-5x slower, Megamorphic: 10-50x slower",
+      "file": "monomorphic-patterns.js"
+    },
+    "deleteVsUndefined": {
+      "claim": "Setting to undefined: 30-70% faster than delete, Dictionary mode: 3-5x slower",
+      "file": "performance-cliffs.js"
+    },
+    "configObject": {
+      "claim": "Config object disaster: 100x slowdown",
+      "file": "config-object-disaster.js"
+    },
+    "bigintDeopt": {
+      "claim": "BigInt mixing: 10-100x performance degradation",
+      "file": "bigint-deoptimization.js"
+    },
+    "arrayElements": {
+      "claim": "SMI: 1x, Double: ~1.2x, Packed: ~2-3x, Holey: ~3-5x, Dictionary: ~10x+ slower",
+      "file": "array-element-kinds.js"
+    },
+    "deoptimization": {
+      "claim": "Deoptimization: 10-100x slowdowns",
+      "file": "deoptimization-triggers.js"
+    }
+  }
+}

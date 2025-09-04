@@ -14,7 +14,7 @@ When you see **"240 chapters,"** you're probably thinking, "Holy crap, is this o
 
 And look, the honest answer is **no**, you don't need all of this to ship production apps. _But_ - and this is the entire point of this project - what I've learned the hard way is that deeply understanding **one runtime** makes you exponentially better at **all backend engineering**.
 
-All that stuff we're diving into - the event loop, thread pools, memory management, system calls, network buffers—that’s not some weird, Node.js-only trivia. That's the core of computer science. Node just happens to be the implementation we're using to learn it. I've lived this: when I had to jump into a Rust service using `tokio`, the whole async runtime just clicked because I'd already wrestled with Node's event loop.
+All that stuff we're diving into - the event loop, thread pools, memory management, system calls, network buffers - that’s not some weird, Node.js-only trivia. That's the core of computer science. Node just happens to be the implementation we're using to learn it. I've lived this: when I had to jump into a Rust service using `tokio`, the whole async runtime just clicked because I'd already wrestled with Node's event loop.
 
 This isn't another "Learn Node in 24 Hours" situation. This is 5,000+ pages of the slow, sometimes boring stuff that makes you exponentially better later. The kind of knowledge that turns those night panics into "oh, I know exactly what's happening here" moments.
 

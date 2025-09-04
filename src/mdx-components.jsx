@@ -1,4 +1,4 @@
-import { useMDXComponents as getThemeComponents } from "nextra-theme-docs"; // nextra-theme-blog or your custom theme
+import { useMDXComponents as getThemeComponents } from "nextra-theme-docs";
 
 const themeComponents = getThemeComponents();
 

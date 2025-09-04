@@ -184,6 +184,7 @@ export default async function DocsLayout({ children, ...params }) {
           docsRepositoryBase="https://github.com/ishtms/nodebook"
           footer={footer}
           banner={true}
+          darkMode={true}
           editLink={true}
           navbar={
             <Navbar

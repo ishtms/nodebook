@@ -1,4 +1,5 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+.vercelignore
 
 # dependencies
 /node_modules
@@ -11,6 +12,7 @@
 !.yarn/versions
 src/app/(landing)
 src/app/api
+admin/
 .env
 .env.*
 # testing
