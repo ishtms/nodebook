@@ -913,7 +913,7 @@ Before you even think about changing code, follow this process:
 
 ## V8 Flags and Runtime Options
 
-The Node.js runtime provides a powerful set of V8 flags that let you tune, debug, and exampine the engine's behavior. You can list all available flags for your version of Node with `node --v8-options`. Here are some of the most critical ones for performance engineering.
+The Node.js runtime provides a powerful set of V8 flags that let you tune, debug, and examine the engine's behavior. You can list all available flags for your version of Node with `node --v8-options`. Here are some of the most critical ones for performance engineering.
 
 ### Informational Flags
 
