@@ -1,9 +1,5 @@
 # The Event Loop explained
 
-> [!WARNING]
->
-> You've received an early-access preview of this chapter. It may contain typos, errors, or missing content. Your feedback helps improve the final version! Please report any issues to `hello@thenodebook.com` or creating an issue on [the github repo](https://github.com/ishtms/nodebook)
-
 ## The Single-Threaded Model
 
 If you're here, you've probably written some Node.js code before. You live and breathe asynchronicity. You probably write `Promise.then()` chains in your sleep and use `async/await` with the kind of fluency that makes others jealous. You know - deep in your bones - that you must _never, ever_ block the main thread. You get the _what_ of writing non-blocking code.
@@ -330,7 +326,6 @@ Let's walk through the execution of that code to see how it traps the event loop
 4. `console.log("Starting the starvation...");` This is the first piece of code that actually runs. It's a synchronous operation. It gets pushed onto the call stack, prints its message to the console, and pops off. Easy.
 
 5. `starveTheLoop();` This is where the trap is sprung. We make the first call to our function. The following happens -
-
    - `starveTheLoop` is pushed onto the call stack.
    - It prints `Starvation call: ${++count}`. The console now shows "Starvation call: 1".
    - Now for the critical part: it calls **`process.nextTick(starveTheLoop)`**. This doesn't call the function right away. Instead, it places the `starveTheLoop` function into the high-priority `nextTick` queue.

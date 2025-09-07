@@ -1,11 +1,11 @@
-import { Footer, Layout, Navbar } from "nextra-theme-docs";
-import { Banner, Head } from "nextra/components";
-import { getPageMap } from "nextra/page-map";
-import { Bricolage_Grotesque, IBM_Plex_Sans_Condensed } from "next/font/google";
-import "nextra-theme-docs/style.css";
-import Image from "next/image";
-import "../docs.css";
 import JsonLd, { homepageSchema } from "@/components/JsonLd";
+import { Bricolage_Grotesque, IBM_Plex_Sans_Condensed } from "next/font/google";
+import Image from "next/image";
+import { Footer, Layout, Navbar } from "nextra-theme-docs";
+import "nextra-theme-docs/style.css";
+import { Head } from "nextra/components";
+import { getPageMap } from "nextra/page-map";
+import "../docs.css";
 const bricolageGrotesque = Bricolage_Grotesque({
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700", "800"],
@@ -22,8 +22,8 @@ const ibmPlexSansCondensed = IBM_Plex_Sans_Condensed({
 
 export const metadata = {
   title: {
-    default: "NodeBook | Master Node.js - Complete Guide to Node.js Development",
-    template: "%s | NodeBook - Master Node.js",
+    // default: "NodeBook | Master Node.js - Complete Guide to Node.js Development",
+    template: "%s",
   },
   description:
     "Learn and Master the complex parts of the Node.js Runtime. From V8's Turbofan optimizer to production deployments. Each chapter includes hands-on labs, real-world examples, and performance insights. The definitive guide to becoming a Node.js expert.",
@@ -171,7 +171,6 @@ export const metadata = {
     "og:image:type": "image/jpeg",
   },
 };
-const footer = <Footer>© {new Date().getFullYear()} Ishtmeet Singh. All rights reserved.</Footer>;
 
 export default async function DocsLayout({ children, ...params }) {
   return (
@@ -182,7 +181,11 @@ export default async function DocsLayout({ children, ...params }) {
         <Layout
           pageMap={await getPageMap()}
           docsRepositoryBase="https://github.com/ishtms/nodebook"
-          footer={footer}
+          footer={
+            <Footer>
+              <div className="text-center py-4">© {new Date().getFullYear()} Ishtmeet Singh. All rights reserved.</div>
+            </Footer>
+          }
           banner={true}
           darkMode={true}
           editLink={true}

@@ -8,15 +8,15 @@
 
 ## TL;DR
 
-Let's get one thing straight: **V8 is both an interpreter and a JIT compiler**. When your Node.js application runs, your JavaScript is first interpreted by **Ignition**, which compiles it into bytecode and executes it directly. For code that matters (your "hot paths"), it's further compiled by **TurboFan** into highly optimized, speculative machine code that runs nearly as fast as C++. This sophisticated multi-tier pipeline balances fast startup with exceptional peak performance.
+Let's get one thing straight: **V8 is both an interpreter and a multi-tier JIT compiler**. When your Node.js application runs, your JavaScript is first interpreted by **Ignition**, which compiles it into bytecode and executes it directly. As your code warms up, it progresses through a sophisticated 4-tier compilation pipeline: **Sparkplug** (fast baseline compiler) → **Maglev** (mid-tier optimizing compiler) → **TurboFan** (advanced optimizing compiler). Each tier offers progressively better performance at the cost of compilation time. For code that matters (your "hot paths"), it's ultimately compiled by TurboFan into highly optimized, speculative machine code that runs nearly as fast as C++. This sophisticated multi-tier pipeline balances fast startup with exceptional peak performance.
 
 > [!NOTE]
 >
-> V8 is both an interpreter and a JIT compiler. Understanding this dual nature is crucial for performance optimization.
+> V8 is both an interpreter and a multi-tier JIT compiler. Understanding this sophisticated compilation pipeline is crucial for performance optimization.
 
-The entire performance model of V8 hinges on a critical assumption: that your code is predictable. V8 makes bets on the _shapes_ of your objects and the _types_ of your variables. It achieves this using an internal mechanism called **Hidden Classes** (or Shapes). Every time you create an object, V8 assigns it a hidden class. When you add a property, it transitions to a new hidden class. V8's compilers, especially TurboFan, generate machine code that is specialized for these hidden classes. This is incredibly fast - as long as the assumptions hold.
+The entire performance model of V8 hinges on a critical assumption: that your code is predictable. V8 makes bets on the _shapes_ of your objects and the _types_ of your variables. It achieves this using an internal mechanism called **Hidden Classes** (or Shapes). Every time you create an object, V8 assigns it a hidden class. When you add a property, it transitions to a new hidden class. V8's compilers, especially Maglev and TurboFan, generate machine code that is specialized for these hidden classes. This is incredibly fast - as long as the assumptions hold.
 
-When your code breaks these assumptions - by creating objects with different property orders, mixing types in arrays, or using dynamic patterns - you trigger a performance cliff. V8 is forced to throw away the optimized machine code in a process called **deoptimization** and fall back to the bytecode interpreter. Deoptimizations typically cause slowdowns ranging from 2x to 20x, depending on the context. In tight loops or extremely hot paths, the penalty can be more severe (potentially 100x or more), but 100x slowdowns are rare edge cases. Understanding this concept - that V8 rewards predictable, stable object shapes and punishes dynamic, unpredictable ones - is the key to unlocking consistent, high-performance Node.js applications. Focus on writing "boring," monomorphic JavaScript that keeps TurboFan happy.
+When your code breaks these assumptions - by creating objects with different property orders, mixing types in arrays, or using dynamic patterns - you trigger a performance cliff. V8 is forced to throw away the optimized machine code in a process called **deoptimization** and fall back to the bytecode interpreter or a lower compilation tier. Deoptimizations typically cause slowdowns ranging from 2x to 20x, depending on the context. In tight loops or extremely hot paths, the penalty can be more severe (potentially 100x or more), but 100x slowdowns are rare edge cases. Understanding this concept - that V8 rewards predictable, stable object shapes and punishes dynamic, unpredictable ones - is the key to unlocking consistent, high-performance Node.js applications. Focus on writing "boring," monomorphic JavaScript that keeps the optimizing compilers happy.
 
 ## The 100x Slowdown Mystery
 
@@ -36,11 +36,11 @@ We were treating our JavaScript objects like convenient hash maps, adding proper
 
 ## How V8 Actually Executes JavaScript
 
-Most of us start with a simple mental model: JavaScript is an interpreted language. You write code, an engine reads it line by line, and does what it says. This model is not just wrong; it's dangerously wrong if you care about performance. V8 doesn't interpret your code in the traditional sense. It compiles it.
+Most of us start with a simple mental model: JavaScript is an interpreted language. You write code, an engine reads it line by line, and does what it says. This model is not just wrong; it's dangerously wrong if you care about performance. V8 doesn't interpret your code in the traditional sense. It compiles it through a sophisticated multi-tier pipeline.
 
 The journey from your `.js` file to executed machine code is a multi-stage pipeline designed for one thing: speed. Specifically, it's designed for a fast startup (don't spend too long compiling upfront) and incredible peak performance for code that runs frequently. This is the core idea of a **Just-In-Time (JIT)** compiler.
 
-Here’s the high-level flow:
+Here's the high-level flow:
 
 1.  The first thing V8 does is parse your raw JavaScript source code. It doesn't execute anything yet. The goal is to turn your string of characters into a structured representation the machine can understand. This process involves two key components:
     - **Scanner:** Tokenizes the code, breaking it down into atomic pieces like `const`, `myVar`, `=`, `10`, `;`.
@@ -54,19 +54,23 @@ graph TD
 
 2.  Once the AST is built, V8's interpreter, named **Ignition**, gets to work. Ignition walks the AST and generates **bytecode**. Bytecode is a low-level, platform-independent set of instructions. It's not machine code yet, but it's much closer to the metal than raw JavaScript. For example, an addition operation `a + b` might become bytecode instructions like `Ldar a` (load accumulator with value of `a`), `Add b` (add value of `b` to accumulator). Ignition can then execute this bytecode directly. For code that only runs once, this is often the beginning and end of the story. It's faster than a naive interpreter because it doesn't have to re-parse the source code every time.
 
-3.  While Ignition is executing bytecode, it's also collecting profiling data. It's watching your code run. How many times is this function called? What types of values are being passed to it? What object shapes are being used? This feedback is crucial for the next step. It's like a scout reporting back from the front lines, telling the generals where to focus their efforts.
+3.  While Ignition is executing bytecode, it's also collecting profiling data. It's watching your code run. How many times is this function called? What types of values are being passed to it? What object shapes are being used? This feedback is crucial for the next steps. It's like a scout reporting back from the front lines, telling the generals where to focus their efforts.
 
-4.  When Ignition's profiler identifies a piece of code as "hot" (i.e., it's being executed frequently), it gets handed off to **TurboFan**, the optimizing compiler. TurboFan takes the bytecode from Ignition and the profiling feedback and makes a series of _speculative optimizations_. It says, "Okay, this function has been called 1000 times, and every single time the argument `x` was a number. I'm going to bet it will _always_ be a number." Based on this bet, it generates highly optimized, low-level machine code specific to that assumption. This machine code can bypass many of the checks and overhead of the interpreter, leading to massive speedups.
+4.  When Ignition's profiler identifies a piece of code as "warm" (i.e., it's being executed somewhat frequently), it gets handed off to **Sparkplug**, the baseline compiler. Sparkplug takes the bytecode from Ignition and compiles it directly to machine code without any optimizations. This is faster than interpreting bytecode but doesn't have the overhead of advanced analysis. Sparkplug smooths out the performance cliff between interpreted and optimized code. It was introduced in 2021 to fill a crucial gap in the compilation pipeline.
 
-5.  What happens if TurboFan's bet was wrong? What if, on the 1001st call, you pass a string to that function instead of a number? V8 detects this assumption violation, immediately discards the optimized machine code, and seamlessly transitions execution back to the slower Ignition bytecode. This is called **deoptimization**. It ensures correctness, but it comes at a performance cost. If it happens repeatedly, your application will be stuck in a deadly loop of optimizing and deoptimizing, destroying your performance.
+5.  As functions continue to heat up and become "hot" (executed more frequently with consistent type feedback), they're promoted to **Maglev**, the mid-tier optimizing compiler introduced in Chrome M117 (December 2023). Maglev represents a sweet spot in the compilation pipeline. It takes the bytecode and type feedback from Ignition and generates optimized machine code using Static Single Assignment (SSA) form and a control flow graph. Maglev's philosophy is "good enough code, fast enough" - it compiles ~10x slower than Sparkplug but ~10x faster than TurboFan, producing code that's significantly better than baseline but without the full heavyweight optimization. Maglev performs speculative optimizations based on the type feedback but with less aggressive assumptions than TurboFan.
+
+6.  Finally, for the absolute hottest code paths that have been executed thousands of times with very stable type feedback, V8 promotes functions to **TurboFan**, the advanced optimizing compiler. TurboFan takes the bytecode from Ignition and the rich profiling feedback and makes aggressive _speculative optimizations_. It says, "Okay, this function has been called 10,000 times, and every single time the argument `x` was a number. I'm going to bet it will _always_ be a number." Based on this bet, it generates highly optimized, low-level machine code specific to that assumption. This machine code can bypass many of the checks and overhead of the interpreter, leading to massive speedups.
+
+7.  What happens if any of the optimizing compilers' bets were wrong? What if, on the 10,001st call, you pass a string to that function instead of a number? V8 detects this assumption violation, immediately discards the optimized machine code, and seamlessly transitions execution back to a lower tier - either Maglev, Sparkplug, or all the way back to Ignition bytecode. This is called **deoptimization**. It ensures correctness, but it comes at a performance cost. If it happens repeatedly, your application will be stuck in a deadly loop of optimizing and deoptimizing, destroying your performance.
 
 Let's demolish a common myth right here.
 
 ### Myth 1: "V8 is just an interpreter"
 
-This is fundamentally untrue. While it _has_ an interpreter (Ignition), its main goal is to get to optimized machine code. The bytecode Ignition produces is an implementation detail, a stepping stone to TurboFan.
+This is fundamentally untrue. While it _has_ an interpreter (Ignition), its main goal is to get to optimized machine code through its multi-tier compilation pipeline. The bytecode Ignition produces is an implementation detail, a stepping stone to the optimizing compilers.
 
-Here's a simple diagram of the process:
+Here's a simple diagram of the modern 4-tier process:
 
 ```mermaid
 graph TD
@@ -74,30 +78,49 @@ graph TD
     B --> C[Abstract Syntax Tree - AST]
     C --> D[Ignition Interpreter]
 
-    subgraph Ignition ["Ignition Pipeline"]
+    subgraph Ignition ["Tier 0: Ignition Pipeline"]
         D --> E[Bytecode]
         E --> F[Execution]
-        E -->|profiling data| G{Is function hot?}
+        E -->|profiling data| G{Is function warm?}
     end
 
-    G -->|Yes| H[TurboFan Optimizing Compiler]
+    G -->|Yes| H[Sparkplug Baseline Compiler]
     G -->|No| F
 
-    subgraph TurboFan ["TurboFan Pipeline"]
-        H --> I[Optimized Machine Code]
+    subgraph Sparkplug ["Tier 1: Sparkplug Pipeline"]
+        H --> I[Baseline Machine Code]
         I --> J[Faster Execution]
+        I -->|more profiling| K{Is function hot?}
     end
 
-    I -->|Deoptimization/bailout| E
+    K -->|Yes| L[Maglev Mid-tier Compiler]
+    K -->|No| J
+
+    subgraph Maglev ["Tier 2: Maglev Pipeline"]
+        L --> M[Optimized Machine Code]
+        M --> N[Even Faster Execution]
+        M -->|stable feedback| O{Is function very hot?}
+    end
+
+    O -->|Yes| P[TurboFan Advanced Compiler]
+    O -->|No| N
+
+    subgraph TurboFan ["Tier 3: TurboFan Pipeline"]
+        P --> Q[Highly Optimized Machine Code]
+        Q --> R[Peak Performance]
+    end
+
+    Q -->|Deoptimization/bailout| E
+    M -->|Deoptimization| E
 ```
 
-This pipeline is the heart of V8. Your job as a performance-conscious engineer is to write code that flows smoothly down to TurboFan and _stays there_. Every time your code causes a deoptimization, you're forcing V8 to climb back up to a slower tier, and the performance penalty can be staggering.
+This pipeline is the heart of V8. Your job as a performance-conscious engineer is to write code that flows smoothly up the tiers to TurboFan and _stays there_. Every time your code causes a deoptimization, you're forcing V8 to climb back down to a slower tier, and the performance penalty can be staggering.
 
 ---
 
 ## The Compilation Pipeline: Ignition to TurboFan
 
-Let's zoom in on that pipeline. Understanding the handoff between Ignition and TurboFan is critical because it's where all the performance magic - and all the performance cliffs - happen.
+Let's zoom in on that pipeline. Understanding the progression through each tier is critical because it's where all the performance magic - and all the performance cliffs - happen.
 
 It all starts after parsing. The AST is now in memory.
 
@@ -115,48 +138,76 @@ For example, for the code `function add(a, b) { return a + b; }`:
 - It sees `add(10, 20)`. The feedback is consistent.
 - The function is called 100 times with integers. The feedback vector is now very confident about the types involved.
 
-This feedback is the fuel for TurboFan. Without it, TurboFan is flying blind.
+This feedback is the fuel for all the optimizing compilers. Without it, they would be flying blind.
 
-### Sparkplug
+### Sparkplug: The Fast Baseline
 
-Modern V8 actually has a three-tier compilation pipeline. **Sparkplug** is a baseline compiler introduced in 2021 that fills the gap between Ignition and TurboFan. It takes Ignition's bytecode and compiles it directly to machine code without any optimizations. This is faster than interpreting bytecode but doesn't have the overhead of TurboFan's analysis. Sparkplug smooths out the performance cliff between interpreted and optimized code.
+**Sparkplug** is a baseline compiler introduced in 2021 that serves as the first optimization tier. It takes Ignition's bytecode and compiles it directly to machine code without any optimizations or type specialization. This is faster than interpreting bytecode but doesn't have the overhead of advanced analysis.
 
-Here's the modern three-tier compilation pipeline:
+The key insight behind Sparkplug is that even unoptimized machine code is often better than interpreted bytecode. It provides a smooth transition from Ignition to the more aggressive optimizing compilers, reducing the performance cliff that used to exist.
+
+### Maglev: The Mid-Tier Optimizer
+
+**Maglev** is V8's newest addition to the compilation pipeline, introduced in Chrome M117 (December 2023). It fills a crucial gap between Sparkplug's fast-but-unoptimized code and TurboFan's slow-to-compile-but-highly-optimized code.
+
+Maglev's design philosophy is "good enough code, fast enough." Here's what makes it special -
+
+1. Unlike Sparkplug's direct bytecode-to-machine-code translation, Maglev builds a proper Static Single Assignment (SSA) form representation with a control flow graph. This allows it to perform meaningful optimizations while keeping compilation time reasonable.
+
+2. It uses the type feedback from Ignition to generate specialized code. If a function always receives integers, Maglev will generate integer-specific machine code. But it's less aggressive than TurboFan - it makes safer bets that are less likely to require deoptimization.
+
+3. It compiles approximately 10x slower than Sparkplug but 10x faster than TurboFan. This makes it perfect for code that's hot enough to benefit from optimization but not so critical that it needs TurboFan's heavyweight treatment.
+
+4. One of it's surprising benefits is reduced energy consumption. By providing good-enough optimization quickly, it prevents the CPU from spinning in less efficient code while waiting for TurboFan to finish its compilation.
+
+5. Maglev serves as a proving ground. Code that performs well in Maglev with stable type feedback becomes a strong candidate for TurboFan optimization.
+
+Here's the modern four-tier compilation pipeline -
 
 ```mermaid
 graph TD
     subgraph "Tier 0: Interpreter"
-        A[Ignition: Executes Bytecode]
+        A[Ignition: Executes Bytecode<br/>Collects Type Feedback]
     end
 
     subgraph "Tier 1: Baseline Compiler"
-        B[Sparkplug: Fast, Unoptimized Machine Code]
+        B[Sparkplug: Fast, Unoptimized Machine Code<br/>No Type Specialization]
     end
 
-    subgraph "Tier 2: Optimizing Compiler"
-        C[TurboFan: Highly Optimized Machine Code]
+    subgraph "Tier 2: Mid-Tier Optimizer"
+        C[Maglev: SSA-Based Optimization<br/>Type Specialization, Safer Assumptions]
     end
 
-    A -- "Function gets warm" --> B
-    B -- "Function gets 'hot'" --> C
-    C -- "Speculation Fails (Deopt!)" --> A
+    subgraph "Tier 3: Advanced Optimizer"
+        D[TurboFan: Aggressive Speculation<br/>Maximum Performance]
+    end
+
+    A -- "Function gets warm<br/>(~10-100 calls)" --> B
+    B -- "Function gets hot<br/>(~100-1000 calls)" --> C
+    C -- "Function gets very hot<br/>(~1000+ calls)" --> D
+    D -- "Speculation Fails (Deopt!)" --> A
+    C -- "Type Assumption Fails" --> A
 ```
 
 ### TurboFan's Trigger: The Hotness Counter
 
-How does V8 decide when to optimize? It uses a simple counter. Every time a function is executed, V8 might increment its hotness counter. When this counter reaches a certain threshold, V8 flags the function for optimization.
+How does V8 decide when to optimize? It uses a combination of counters and heuristics. Every time a function is executed, V8 might increment its hotness counter. When this counter reaches certain thresholds, V8 promotes the function to the next tier.
 
-This isn't just about the number of calls. The frequency of loops also matters. A loop that runs thousands of times inside a function will quickly make that function "hot."
+The thresholds aren't fixed - V8 adjusts them based on various factors:
 
-Once flagged, the **compilation job** is sent to a background thread. This is important: V8 doesn't block your main application thread to compile your code. It does the heavy lifting in parallel, ensuring your app remains responsive.
+- Loop iterations count more than function calls
+- Functions with stable type feedback are promoted more aggressively
+- Available CPU resources influence promotion decisions
 
-### TurboFan's speculative optimization
+Once flagged for TurboFan optimization, the **compilation job** is sent to a background thread. This is important: V8 doesn't block your main application thread to compile your code. It does the heavy lifting in parallel, ensuring your app remains responsive.
 
-TurboFan now has two things: the **bytecode from Ignition** and the **rich Type Feedback**. It begins its work, which is a masterclass in speculation.
+### TurboFan's Speculative Optimization
+
+TurboFan now has three things: the **bytecode from Ignition**, the **rich Type Feedback**, and potentially **optimized code from Maglev** to analyze. It begins its work, which is a masterclass in speculation.
 
 TurboFan doesn't work with bytecode directly. It converts it into an internal graph representation called a "**sea of nodes.**" This graph makes it easier to apply advanced compiler optimizations like redundant/dead code elimination, [constant folding](https://en.wikipedia.org/wiki/Constant_folding), and [loop unrolling](https://en.wikipedia.org/wiki/Loop_unrolling).
 
-TurboFan looks at the feedback vector and makes its bets. "The feedback for `obj.x` says it has always seen the same object shape. I will generate machine code that assumes this shape." This means instead of a generic "look up property `x` on this object" operation (which involves a hash map lookup), it can generate a direct memory access: `mov rax, [rbx + 0x18]`. This is the difference between a slow, multi-step process and a single, blazing-fast CPU instruction.
+TurboFan looks at the feedback vector and makes its most aggressive bets. "The feedback for `obj.x` says it has always seen the same object shape. I will generate machine code that assumes this shape." This means instead of a generic "look up property `x` on this object" operation (which involves a hash map lookup), it can generate a direct memory access: `mov rax, [rbx + 0x18]`. This is the difference between a slow, multi-step process and a single, blazing-fast CPU instruction.
 
 > [!NOTE]
 >
@@ -166,11 +217,11 @@ If a hot function `foo()` calls another function `bar()`, TurboFan might decide 
 
 What if a function is already running when it becomes hot? Imagine a long-running `for` loop. The function was called once, but the loop has been spinning for millions of iterations. V8 can't wait for the function to return to swap in the optimized code. This is where **On-Stack Replacement** (OSR) comes in. While the loop is running in slow Ignition bytecode, TurboFan compiles an optimized version in the background. Once it's ready, V8 can pause execution _in the middle of the loop_, replace the execution frame on the stack with the new optimized frame, and resume execution in the fast machine code.
 
-What you get from TurboFan is a block of machine code that’s been highly optimized based on the behavior Ignition observed. This code is extremely fast, but there's a catch: it's totally dependent on those early observations holding true.
+What you get from TurboFan is a block of machine code that's been highly optimized based on the behavior Ignition observed. This code is extremely fast, but there's a catch: it's totally dependent on those early observations holding true.
 
 ## Hidden Classes
 
-**This is it**. If you only learn one thing about V8 internals, make it this. **Hidden Classes** (also called "Shapes" or "Maps" in V8's source code) are the mechanism V8 uses to implement fast property access on JavaScript objects. They are the foundation upon which TurboFan builds its optimizations.
+**This is it**. If you only learn one thing about V8 internals, make it this. **Hidden Classes** (also called "Shapes" or "Maps" in V8's source code) are the mechanism V8 uses to implement fast property access on JavaScript objects. They are the foundation upon which all the optimizing compilers build their optimizations.
 
 Let's bust another myth.
 
@@ -216,7 +267,7 @@ When you add `p1.y = 10`, it does the same thing: it creates `C2` and a transiti
 
 Now, if you create another object, `const p2 = {}`, it starts at `C0`. If you then add `p2.x = 15`, V8 sees the existing transition and simply moves `p2` to hidden class `C1`. If you then add `p2.y = 20`, it moves to `C2`. Now, `p1` and `p2` have the _exact same hidden class_. V8 can optimize any code that operates on these objects because it knows they have the same memory layout.
 
-Here’s the killer. What if you create `const p3 = {}` and add the properties in a different order?
+Here's the killer. What if you create `const p3 = {}` and add the properties in a different order?
 `p3.y = 1;`
 `p3.x = 2;`
 
@@ -257,7 +308,7 @@ function createConfig(base, userOverrides, requestParams) {
 }
 ```
 
-Because `userOverrides` added keys in an unpredictable order and `optionalFeature` was only sometimes present, we were creating dozens, sometimes hundreds, of different hidden classes for objects that were logically the same. When TurboFan tried to optimize functions that used these `config` objects, it saw chaos. It couldn't make any reliable bets, so it just gave up. Or worse, it would optimize for one shape, then immediately deoptimize when it saw another.
+Because `userOverrides` added keys in an unpredictable order and `optionalFeature` was only sometimes present, we were creating dozens, sometimes hundreds, of different hidden classes for objects that were logically the same. When the optimizing compiler (TurboFan) tried to optimize functions that used these `config` objects, they saw chaos. They couldn't make any reliable bets, so they just gave up. Or worse, they would optimize for one shape, then immediately deoptimize when they saw another.
 
 Here's how the hidden class fork happened in our config object:
 
@@ -296,7 +347,7 @@ function createConfigV2(base, userOverrides, requestParams) {
 }
 ```
 
-By creating a stable initial shape, we ensured that almost all our config objects shared the same hidden class. This allowed TurboFan to generate highly optimized code for handling them, and our latency dropped from 200ms back down to 2ms. We learned a brutal lesson: **property addition order is not just a stylistic choice, it's a critical performance determinant**.
+By creating a stable initial shape, we ensured that almost all our config objects shared the same hidden class. This allowed the optimizing compilers to generate highly optimized code for handling them, and our latency dropped from 200ms back down to 2ms. We learned a brutal lesson: **property addition order is not just a stylistic choice, it's a critical performance determinant**.
 
 > [!CAUTION]
 >
@@ -334,7 +385,7 @@ This brings us to the different "modes" or states an IC can be in. This is where
 3.  **Polymorphic -** The IC has seen a small number of different hidden classes (typically 2 to 4). `Poly` means many. V8 can still handle this, but it's slower. It has to add checks: "Is it shape A? If so, use offset X. Is it shape B? If so, use offset Y?" This is still faster than a full dynamic lookup.
 4.  **Megamorphic -** The IC has seen too many different hidden classes. `Mega` means huge. At this point, V8 gives up. The IC is considered "polluted," and V8 falls back to the slow, generic lookup. Performance goes off a cliff.
 
-Here’s how an IC transitions through these states -
+Here's how an IC transitions through these states -
 
 ```mermaid
 stateDiagram-v2
@@ -459,9 +510,9 @@ The goal is to write functions that operate on predictable data structures. When
 
 ## Deoptimization - When V8 Gives Up
 
-Deoptimization is V8's emergency eject button. It's the process of throwing away fast, optimized machine code and falling back to the slow-but-safe bytecode interpreter. It is, without a doubt, the single biggest cause of mysterious performance problems in Node.js applications.
+Deoptimization is V8's emergency eject button. It's the process of throwing away fast, optimized machine code and falling back to a lower compilation tier. It is, without a doubt, the single biggest cause of mysterious performance problems in Node.js applications.
 
-Remember, TurboFan's machine code is _speculative_. It's built on a pile of assumptions (type feedback) gathered by Ignition. Deoptimization occurs whenever one of those assumptions is proven false at runtime.
+Remember, the optimized machine code from Maglev and TurboFan is _speculative_. It's built on a pile of assumptions (type feedback) gathered by Ignition. Deoptimization occurs whenever one of those assumptions is proven false at runtime.
 
 ### Common Deoptimization Triggers
 
@@ -505,7 +556,7 @@ This is the "Deoptimization Loop of Death" in the wild:
 graph TD
     A[1. Ignition executes & profiles] --> B{Is function hot?};
     B -- No --> A;
-    B -- Yes --> C[2. TurboFan optimizes based on type assumption];
+    B -- Yes --> C[2. Maglev/TurboFan optimize based on type assumption];
     C --> D[3. Fast, optimized code runs];
     D --> E{Assumption fails?};
     E -- No --> D;
@@ -596,7 +647,7 @@ function validateTransactionBigInt(tx) {
 
 ###### Alternative B: The Guarded Branch (Pragmatic Middle Ground)
 
-If you want to keep your logic in a single function, you can use an explicit `typeof` check. This creates two different paths within the same function. While this makes the function **polymorphic** (seeing multiple types), it’s a clear signal to V8 and is often optimized well - certainly better than incurring repeated deopts.
+If you want to keep your logic in a single function, you can use an explicit `typeof` check. This creates two different paths within the same function. While this makes the function **polymorphic** (seeing multiple types), it's a clear signal to V8 and is often optimized well - certainly better than incurring repeated deopts.
 
 ```javascript
 function validateTransaction(tx) {
@@ -614,7 +665,7 @@ function validateTransaction(tx) {
 
 > [!WARNING]
 >
-> A single function that contains both a bigint path and a number path (via typeof checks) is polymorphic. That’s often fine - but in very hot loops it can make V8 generate slower, less-stable machine code than splitting those paths into two monomorphic functions and dispatching once up-front. Pick the dispatcher for raw performance in the hot path; pick the guarded-branch for simplicity when the branch is predictable or the path isn’t super hot.
+> A single function that contains both a bigint path and a number path (via typeof checks) is polymorphic. That's often fine - but in very hot loops it can make V8 generate slower, less-stable machine code than splitting those paths into two monomorphic functions and dispatching once up-front. Pick the dispatcher for raw performance in the hot path; pick the guarded-branch for simplicity when the branch is predictable or the path isn't super hot.
 
 ## Memory Layout and Object Representation
 
@@ -652,16 +703,16 @@ This is how V8 handles all the complex data that can't be represented as a Smi: 
 
 To keep its memory usage low, V8 uses a fantastic optimization by default called **pointer compression**. This means that even on a 64-bit system, these pointers are often stored in compact **32-bit** slots.
 
-Here’s a simplified look at a tagged pointer in V8's memory-saving mode:
+Here's a simplified look at a tagged pointer in V8's memory-saving mode:
 
 ```mermaid
 graph LR
-    subgraph 32-bit Tagged Pointer
-        Address["Heap Offset<br/>31 bits for the address"]
-        Tag["1<br/>The 'It's a Pointer!' Tag"]
-    end
-    style Address text-align:center
-    style Tag text-align:center
+    subgraph 32-bit Tagged Pointer
+        Address["Heap Offset<br/>31 bits for the address"]
+        Tag["1<br/>The 'It's a Pointer!' Tag"]
+    end
+    style Address text-align:center
+    style Tag text-align:center
 ```
 
 Let's take a number like `const a = 3.14;`. In the classic sense, V8 would handle this by creating a `HeapNumber` object, which involves a few steps -
@@ -675,7 +726,7 @@ But this is where the story gets exciting. The V8 team has spent years optimizin
 - **Unboxing -** V8 can store a number's raw value directly inside another object's memory, avoiding the need to allocate a separate `HeapNumber` object.
 - **Escape Analysis -** If a number is created and used only within a single function and never "escapes" to an outer scope, V8 is smart enough to avoid heap allocation altogether.
 
-So, while there's a performance cost when heap allocation _does_ occur (it requires managing memory and following pointers), all thanks to V8’s incredible engineering that this happens far less often than you might think.
+So, while there's a performance cost when heap allocation _does_ occur (it requires managing memory and following pointers), all thanks to V8's incredible engineering that this happens far less often than you might think.
 
 ### Object Layout in Memory
 
@@ -919,7 +970,7 @@ The Node.js runtime provides a powerful set of V8 flags that let you tune, debug
 
 These flags don't change behavior but provide a stream of diagnostic information.
 
-- `--trace-opt`: As mentioned, this logs every function that TurboFan successfully optimizes. It's great for confirming that your hot paths are actually being compiled.
+- `--trace-opt`: As mentioned, this logs every function that the optimizing compilers (Sparkplug, Maglev, TurboFan) successfully optimize. It's great for confirming that your hot paths are actually being compiled.
 - `--trace-deopt`: Logs every deoptimization, including the function name, bytecode offset, and the reason. This is arguably the most important performance debugging flag.
 - `--trace-ic`: Shows the state transitions of Inline Caches. Useful for diagnosing polymorphic and megamorphic call sites. You can see a property access go from `1` (monomorphic) to `P` (polymorphic) to `N` (megamorphic).
 - `--trace-gc`: Prints a log line for every garbage collection event, showing how much memory was collected and how long it took. Useful for diagnosing memory pressure and GC pauses.
@@ -928,10 +979,10 @@ These flags don't change behavior but provide a stream of diagnostic information
 
 These flags can alter how V8 optimizes and executes code. Use with caution.
 
-- `--allow-natives-syntax`: Exposes the `%` functions for scripting V8's internals. Helpfeul for detailed analysis and benchmarking, but never for production.
+- `--allow-natives-syntax`: Exposes the `%` functions for scripting V8's internals. Helpful for detailed analysis and benchmarking, but never for production.
 - `--optimize-for-size`: Asks V8 to be more conservative with optimizations to reduce the memory footprint of compiled code. This can be useful in low-memory environments.
 - `--max-old-space-size=<megabytes>`: Sets the maximum size of the old generation heap. Increasing this can reduce GC frequency for memory-intensive applications, but also lead to longer GC pauses when they do occur.
-- `--jitless`: This is an interesting one. It completely disables the JIT (TurboFan). Your code will only ever be run by the Ignition interpreter. This provides better security (by preventing runtime code generation) at a significant performance cost. It's useful for establishing a "baseline" performance to see how much TurboFan is actually helping.
+- `--jitless`: This is an interesting one. It completely disables the JIT (Sparkplug, Maglev, TurboFan). Your code will only ever be run by the Ignition interpreter. This provides better security (by preventing runtime code generation) at a significant performance cost. It's useful for establishing a "baseline" performance to see how much the optimizing compilers are actually helping.
 
 ### How to Use Flags
 
@@ -946,7 +997,7 @@ Knowing how to use these flags is like having a diagnostic toolkit for the engin
 
 ## From Full-Codegen to TurboFan
 
-The V8 architecture we've discussed - Ignition and TurboFan - is relatively new. It was fully rolled out around 2017. To appreciate its design, it's helpful to understand what came before it.
+The V8 architecture we've discussed - the 4-tier pipeline with Ignition, Sparkplug, Maglev, and TurboFan - is the result of years of evolution. To appreciate its design, it's helpful to understand what came before it.
 
 For many years, V8's pipeline consisted of two main components -
 
@@ -961,7 +1012,7 @@ However, this architecture had several problems:
 - Full-Codegen generated a lot of machine code, and the Crankshaft pipeline itself was memory-intensive.
 - The two compilers didn't share much code. Adding new language features often meant implementing them twice, in two different ways.
 
-### The New Pipeline: Ignition and TurboFan
+### The New Pipeline: Ignition and TurboFan (and later Sparkplug and Maglev)
 
 The V8 team undertook a massive project to re-architect the engine from the ground up. This resulted in the modern pipeline -
 
@@ -974,11 +1025,9 @@ The V8 team undertook a massive project to re-architect the engine from the grou
 - It has a much better-defined "tiering" model. The path from Ignition to TurboFan is smoother, and deoptimization is less catastrophic.
 - It can handle constructs like `try...catch` and `with` much more gracefully than Crankshaft ever could.
 
-This new pipeline, introduced in V8 v5.9, provided significant real-world benefits -
+**Sparkplug (2021) -** Added as a baseline compiler to smooth the transition between interpreter and optimizer.
 
-- Ignition's bytecode is much more compact than Full-Codegen's machine code, leading to memory savings of 5-10% on real websites.
-- Less time is spent compiling code that will never be hot.
-- The performance cliff between the baseline and optimized tiers is less steep, and deoptimization is handled more efficiently.
+**Maglev (2023) -** The latest addition, providing a mid-tier optimization level that balances compilation speed with code quality. This new pipeline, which evolved from V8 v5.9 (2017) through to the current 4-tier system, provided significant real-world benefits that we talked about in this chapter.
 
 Here's how the architecture evolved -
 
@@ -996,13 +1045,20 @@ graph TD
 
 ```mermaid
 graph TD
-  subgraph "Modern Architecture (Ignition + TurboFan)"
+  subgraph "Modern Architecture (2024)"
         New_A[JavaScript] --> New_B[Ignition Interpreter];
         New_B --> New_C[Bytecode];
-        New_C --> New_D{Hot?};
-        New_D -- Yes --> New_E[TurboFan];
-        New_E --> New_F[Optimized Machine Code];
-        New_F -- Deopt --> New_C;
+        New_C --> New_D{Warm?};
+        New_D -- Yes --> New_E[Sparkplug];
+        New_E --> New_F[Baseline Machine Code];
+        New_F --> New_G{Hot?};
+        New_G -- Yes --> New_H[Maglev];
+        New_H --> New_I[Optimized Machine Code];
+        New_I --> New_J{Very Hot?};
+        New_J -- Yes --> New_K[TurboFan];
+        New_K --> New_L[Highly Optimized Machine Code];
+        New_L -- Deopt --> New_C;
+        New_I -- Deopt --> New_C;
     end
 ```
 
@@ -1010,16 +1066,16 @@ This history demolishes another myth.
 
 ### Myth 3: "Modern V8 optimizes everything"
 
-Not even close. V8 doesn't _want_ to optimize everything. Optimization is expensive. The entire design of the modern Ignition/Sparkplug/TurboFan pipeline is based on the idea of **tiered compilation**. It does the absolute minimum work required to get your code running (Ignition) and only spends CPU cycles on optimizing the small percentage of your code that is actually performance-critical. Your job is to make that small percentage of code easy for TurboFan to understand and optimize.
+Not even close. V8 doesn't _want_ to optimize everything. Optimization is expensive. The entire design of the modern Ignition/Sparkplug/Maglev/TurboFan pipeline is based on the idea of **tiered compilation**. It does the absolute minimum work required to get your code running (Ignition) and only spends CPU cycles on optimizing the small percentage of your code that is actually performance-critical. Your job is to make that small percentage of code easy for the optimizing compilers to understand and optimize.
 
 ## Best practices for V8 performance
 
 This is the actionable summary. If you're in a performance review and need a checklist, this is it.
 
-**DO's:**
+**DO's -**
 
 - Use constructors, classes, or factory functions to ensure objects have the same hidden class. Initialize all members, even with `null` or `undefined`.
-- Write functions that operate on a single, predictable object shape (monomorphic). If you must handle multiple shapes, consider breaking the function into smaller, monomorpic ones.
+- Write functions that operate on a single, predictable object shape (monomorphic). If you must handle multiple shapes, consider breaking the function into smaller, monomorphic ones.
 - Leverage the fast path for Small Integers (Smis) whenever possible.
 - Don't guess where your bottlenecks are. Use `node --prof` or the Chrome Inspector to find them.
 - Use `--trace-deopt` to find and fix deoptimization loops.
@@ -1098,12 +1154,12 @@ Common intrinsics: `%HaveSameMap(obj1, obj2)`, `%GetOptimizationStatus(func)`, `
 
 ## Closing - thinking like V8
 
-We started this journey with a mystery: a simple line of code causing a 100x slowdown. The solution wasn't a clever algorithm or a complex refactor. It’s about peeking under the hood to see what really makes your JavaScript go _vroom_.
+We started this journey with a mystery: a simple line of code causing a 100x slowdown. The solution wasn't a clever algorithm or a complex refactor. It's about peeking under the hood to see what really makes your JavaScript go _vroom_.
 
 The biggest shift you can make as a Node.js developer is to stop seeing V8 as an unpredictable black box. It's not. It's a highly opinionated, deterministic system. It has strong preferences: it likes stable object shapes, it likes monomorphic functions, it likes integer arithmetic, and it hates unpredictability.
 
 Your job isn't to outsmart the compiler. You will lose. Your job is to write code that makes the compiler's job easy. Feed it a steady diet of the simple, predictable patterns it's designed to devour, and it will reward you with sweet speed. Create chaos with dynamic shapes and polymorphic calls, and it will protect itself - and your application's correctness - by retreating to the slow path.
 
-The next time you're facing a weird performance issue, don't just look at your code's logic. Ask yourself: "How would V8 see this?" Think about the hidden classes you're creating. Think about the type feedback you're generating. Think like V8, and the performance issues will start to solve themselves.
+The next time you're facing a weird performance issue, don't just look at your code's logic. Ask yourself: "How would V8 see this?" Think about the hidden classes you're creating. Think about the type feedback you're generating. Think about how your code progresses through the 4-tier compilation pipeline. Think like V8, and the performance issues will start to solve themselves.
 
 ---
