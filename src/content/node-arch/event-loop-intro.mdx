@@ -191,7 +191,6 @@ After timers, the loop zips through a couple of internal phases you rarely inter
 > [!NOTE]
 >
 > **Poll**(ing) generally means asking “is there anything ready?” repeatedly. For example, asking the kernel which I/O handles (file descriptors, sockets, etc.) are ready to perform I/O.
-> .
 
 Alright, pay attention, because this is the big one. The poll phase is arguably the most important and complex part of the whole loop. It does two main things -
 

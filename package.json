@@ -5,13 +5,14 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
-    "postbuild": "next-sitemap",
+    "postbuild": "next-sitemap && npx -y pagefind --site .next/server/app --output-path public/_pagefind",
     "start": "next start",
     "lint": "biome check",
     "format": "biome format --write"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.7",
+    "canvas-confetti": "^1.9.3",
     "clsx": "^2.1.1",
     "critters": "^0.0.25",
     "next": "15.5.2",

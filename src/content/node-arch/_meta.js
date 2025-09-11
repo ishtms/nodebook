@@ -1,7 +1,11 @@
 export default {
-  "what-is-nodejs": "What Node.js Actually Is ",
+  "what-is-nodejs": "What Node.js Actually Is",
   "v8-engine-intro": "Inside the v8 engine",
   "event-loop-intro": {
     title: "The Node.js Event Loop",
+  },
+  "node-process-lifecycle": {
+    title: "The Node.js Process Lifecycle",
+    display: "hidden",
   },
 };

@@ -328,7 +328,7 @@ time ( \
 
 Look at the console output of `blocking_server.py`. You'll see something like this:
 
-```
+```ansi
 Request received. Starting 2-second 'work'...
 Work finished. Sending response.
 Request received. Starting 2-second 'work'...
@@ -361,7 +361,7 @@ time ( \
 
 Look at the console output of `non_blocking_server.js`. You'll see something dramatically different:
 
-```
+```ansi
 Request received. Scheduling 2-second 'work'...
 Request received. Scheduling 2-second 'work'...
 Request received. Scheduling 2-second 'work'...

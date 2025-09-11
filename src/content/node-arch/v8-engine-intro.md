@@ -64,7 +64,7 @@ graph TD
 
 7.  What happens if any of the optimizing compilers' bets were wrong? What if, on the 10,001st call, you pass a string to that function instead of a number? V8 detects this assumption violation, immediately discards the optimized machine code, and seamlessly transitions execution back to a lower tier - either Maglev, Sparkplug, or all the way back to Ignition bytecode. This is called **deoptimization**. It ensures correctness, but it comes at a performance cost. If it happens repeatedly, your application will be stuck in a deadly loop of optimizing and deoptimizing, destroying your performance.
 
-Let's demolish a common myth right here.
+Let's clear a common myth right here.
 
 ### Myth 1: "V8 is just an interpreter"
 
@@ -1062,7 +1062,7 @@ graph TD
     end
 ```
 
-This history demolishes another myth.
+This history clears up another myth.
 
 ### Myth 3: "Modern V8 optimizes everything"
 

@@ -23,7 +23,7 @@ const ibmPlexSansCondensed = IBM_Plex_Sans_Condensed({
 export const metadata = {
   title: {
     // default: "NodeBook | Master Node.js - Complete Guide to Node.js Development",
-    template: "%s",
+    template: "%s | NodeBook",
   },
   description:
     "Learn and Master the complex parts of the Node.js Runtime. From V8's Turbofan optimizer to production deployments. Each chapter includes hands-on labs, real-world examples, and performance insights. The definitive guide to becoming a Node.js expert.",
