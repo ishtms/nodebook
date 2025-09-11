@@ -160,7 +160,7 @@ TurboFan looks at the feedback vector and makes its bets. "The feedback for `obj
 
 > [!NOTE]
 >
-> Don't worry if you havne't seen assembly code before. This instruction is a direct command to fetch data from a precise memory location. It calculates the address using the object's location (rbx) plus a fixed offset (+ 0x18), completely skipping a slow property lookup.
+> Don't worry if you haven't seen assembly code before. This instruction is a direct command to fetch data from a precise memory location. It calculates the address using the object's location (rbx) plus a fixed offset (+ 0x18), completely skipping a slow property lookup.
 
 If a hot function `foo()` calls another function `bar()`, TurboFan might decide to **inline** `bar()`. It essentially copies the machine code for `bar()` directly into the code for `foo()`, eliminating the overhead of a function call. This is one of the most powerful optimizations V8 performs.
 
