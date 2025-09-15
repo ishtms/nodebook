@@ -5,6 +5,7 @@ import { Footer, Layout, Navbar } from "nextra-theme-docs";
 import "nextra-theme-docs/style.css";
 import { Head } from "nextra/components";
 import { getPageMap } from "nextra/page-map";
+import "katex/dist/katex.min.css";
 import "../docs.css";
 const bricolageGrotesque = Bricolage_Grotesque({
   subsets: ["latin"],

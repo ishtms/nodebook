@@ -5,7 +5,6 @@ export default {
     title: "The Node.js Event Loop",
   },
   "node-process-lifecycle": {
-    title: "The Node.js Process Lifecycle",
-    display: "hidden",
+    title: "Node.js Process Lifecycle",
   },
 };

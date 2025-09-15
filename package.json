@@ -2,6 +2,7 @@
   "name": "booksite",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
@@ -15,10 +16,12 @@
     "canvas-confetti": "^1.9.3",
     "clsx": "^2.1.1",
     "critters": "^0.0.25",
+    "dotenv": "^16.4.7",
     "next": "15.5.2",
     "next-sitemap": "^4.2.3",
     "nextra": "^4.4.0",
     "nextra-theme-docs": "^4.4.0",
+    "node-fetch": "^3.3.2",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },

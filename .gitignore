@@ -6,6 +6,10 @@ public/*
 /.pnp
 .pnp.*
 .yarn/*
+.ws-state.json
+package.json
+ws*
+src/hooks
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
