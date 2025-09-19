@@ -1,4 +1,6 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+src/app/docs.css
+src/app/globals.css
 src/content/misc
 public/_pagefind
 CLAUDE.md
