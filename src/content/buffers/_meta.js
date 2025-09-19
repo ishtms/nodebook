@@ -1,6 +1,6 @@
 export default {
   "what-is-buffer": {
-    title: "The Node.js Event Loop",
+    title: "What is a Buffer?",
   },
 
   "allocation-patterns": {

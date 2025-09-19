@@ -26,9 +26,9 @@ Imagine your'e working late night on a project trying to wrap tings up, and a te
 
 But you can't. The "API key" part is nagging at you.
 
-You pull up the logs for the user's request. There's an error, but it's not what you expect. It's a downstream service complaining about a malformed request you sent it. You look at the payload logged for that outbound request. And... that’s when you realize something is seriously wrong. The JSON payload, which should contain invoice data, is mangled. It starts correctly, but then it's trailed by gibberish. And in that gibberish, you see it plain as day: `...","line_items": [...], "total": 19.99}} ... bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`. It's a goddamn JSON Web Token. A session token from another user's request, just sitting there, embedded in the middle of a corrupted invoice payload.
+You pull up the logs for the user's request. There's an error, but it's not what you expect. It's a downstream service complaining about a malformed request you sent it. You look at the payload logged for that outbound request. And... that’s when you realize something is seriously wrong. The JSON payload, which should contain invoice data, is mangled. It starts correctly, but then it's trailed by gibberish. And in that gibberish, you see it plain as day - `...","line_items": [...], "total": 19.99}} ... bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`. It's a goddamn JSON Web Token. A session token from another user's request, just sitting there, embedded in the middle of a corrupted invoice payload.
 
-How is this even possible? You trace the code from the invoice generation to the downstream API call. It's a simple workflow. Generate HTML for the invoice, convert it to a PDF stream, buffer the stream, and send it. You find the line where the buffer for the outbound request is created:
+How is this even possible? You trace the code from the invoice generation to the downstream API call. It's a simple workflow. Generate HTML for the invoice, convert it to a PDF stream, buffer the stream, and send it. You find the line where the buffer for the outbound request is created.
 
 ```javascript
 // A developer thought this was a good performance optimization.
@@ -58,7 +58,7 @@ When you run `const buf = Buffer.alloc(1000)`, here’s what happens -
 
 This separation is key to performance. You can pass these Buffers around in your JS code, and you're only ever moving the small V8 heap object, not the potentially huge chunk of binary data itself. The C++ bindings in Node's core (for things like `fs` and `net`) can then operate directly on that off-heap memory without having to constantly copy data back and forth between the JavaScript world and the C++ world.
 
-You can see this yourself. Run a simple Node script and check the memory usage:
+You can see this yourself. Run a simple Node script and check the memory usage.
 
 ```javascript
 // We allocate a 50MB buffer off-heap.
@@ -68,7 +68,7 @@ const bigBuffer = Buffer.alloc(50 * 1024 * 1024);
 console.log(process.memoryUsage());
 ```
 
-The output will look something like this:
+The output will look something like this -
 
 ```json
 {
@@ -108,7 +108,7 @@ console.log(buf);
 // <Buffer 00 00 00 00 00 00 00 00 00 00>
 ```
 
-No matter how many times you run this, no matter what your application was doing a millisecond before, the result is always the same: a buffer full of zeros. This predictability is why it's the default choice. You don't have to think about it. It just works. You can write data into it, knowing you started from a known-good state.
+No matter how many times you run this, no matter what your application was doing a millisecond before, the result is always the same - a buffer full of zeros. This predictability is why it's the default choice. You don't have to think about it. It just works. You can write data into it, knowing you started from a known-good state.
 
 But this safety comes at a cost. That zero-filling step is not free. It's a `memset(0)` call down in C++, which is a loop that writes to memory. For small buffers, this cost is negligible, lost in the noise of your application. But what happens when you're dealing with larger buffers, or you're allocating many smaller buffers in a tight loop?
 
@@ -592,7 +592,7 @@ If you don't have this profile, you are not allowed to proceed. Guesses, feeling
 
 **Finally, if `alloc()` Is a Proven Bottleneck, consider `allocUnsafe()`**
 
-You have a profile. `Buffer.alloc()` is lighting up like a Christmas tree and causing your service to miss its SLAs. Now, and only now, can you _consider_ using `Buffer.allocUnsafe()`. To do so, you must be able to answer "YES" to the following question:
+You have a profile. `Buffer.alloc()` is lighting up like a Christmas tree and causing your service to miss its SLAs. Now, and only now, can you _consider_ using `Buffer.allocUnsafe()`. To do so, you must be able to answer "YES" to the following question -
 
 **Question:** After I call `Buffer.allocUnsafe(size)`, will my very next operations **unconditionally and completely** overwrite every single byte of that buffer, from index 0 to `size - 1`?
 
@@ -636,10 +636,10 @@ The migration path is usually straightforward.
 **`new Buffer(number)`** -> **`Buffer.alloc(number)`** is the most common and critical fix. The old constructor, when passed a number, did _not_ zero-fill the memory. The modern, safe equivalent is `Buffer.alloc()`.
 
 ```javascript
-// BEFORE: Leaks uninitialized memory.
+// BEFORE - Leaks uninitialized memory.
 const unsafeBuf = new Buffer(1024);
 
-// AFTER: Safe, zero-filled buffer.
+// AFTER - Safe, zero-filled buffer.
 const safeBuf = Buffer.alloc(1024);
 ```
 
@@ -648,10 +648,10 @@ From **`Buffer.allocUnsafe(size)`** to **`Buffer.alloc(size)`** if an `allocUnsa
 From **`new Buffer(string)`** to **`Buffer.from(string)`** since the old constructor could also take a string.
 
 ```javascript
-// BEFORE: Deprecated and less explicit.
+// BEFORE - Deprecated and less explicit.
 const oldWay = new Buffer("hello", "utf8");
 
-// AFTER: Modern, clear, and correct.
+// AFTER - Modern, clear, and correct.
 const newWay = Buffer.from("hello", "utf8");
 ```
 
