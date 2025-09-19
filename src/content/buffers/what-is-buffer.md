@@ -1,8 +1,8 @@
-# Buffers in Node.js
+# What is a Buffer?!
 
 I'd recommend you to grab a coffee, for the next few chapters. We're about to pull back the curtain on one of the most fundamental, and frankly, most misunderstood parts of Node.js. If you've ever found yourself staring at a `<Buffer ...>` in your console and felt a slight sense of unease, you're in the right place.
 
-Look, I could just quote what you could find with a simple google search, say a **'Buffer is a fixed-size chunk of memory, bla... bla... bla...'** and call it a day, but where's the real understanding in that? This isn't about learning an API, it's about rewiring a part of your brain that JavaScript has trained to think exclusively in text.
+Look, I can just quote what you could find with a simple google search, say a **'Buffer is a fixed-size chunk of memory, bla... bla... bla...'** and call it a day, but where's the real understanding in that? This isn't about learning an API, it's about rewiring a part of your brain that JavaScript has trained to think exclusively in text.
 
 > [!TIP]
 >
@@ -62,7 +62,7 @@ Let's look at a byte's structure. Reading from right to left, the positions have
 
 ```
 ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
-│ Bit 7 │ Bit 6 │ Bit 5 │ Bit 4 │ Bit 3 │ Bit 2 │ Bit 1 │ Bit 0 │
+│  7  │  6  │  5  │  4  │  3  │  2  │  1  │  0  │
 ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
 │  2⁷ │  2⁶ │  2⁵ │  2⁴ │  2³ │  2² │  2¹ │  2⁰ │
 ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
@@ -248,7 +248,7 @@ Now, with this solid foundation of what a byte truly is, let's watch it all go w
 
 ## A real demo of why text fails
 
-Let's get our hands dirty. Suppose we have a simple PNG image file in our project directory, say `logo.png`. It's a binary file. Our task is simple: read it into memory and then write it back out to a new file, `logo-copy.png`. A simple file copy operation.
+Suppose we have a simple PNG image file in our project directory, say `logo.png`. It's a binary file. Our task is simple: read it into memory and then write it back out to a new file, `logo-copy.png`. A simple file copy operation.
 
 Based on our existing knowledge of Node's `fs` module, the naive attempt looks perfectly reasonable.
 
@@ -366,7 +366,7 @@ But this design isn't magic, and it comes with tradeoffs. Allocating memory dire
 >
 > The two-heap model has performance implications. Creating many small Buffers can be slower than creating many small JS objects due to the overhead of calling into C++ to allocate memory. Node has optimizations (like a memory pool) to mitigate this, which we'll cover in a later chapter.
 
-## The `Buffer`- Node's Pragmatic Solution\*\*
+## The `Buffer`- Node's Solution
 
 Now that we understand the problem (strings are dangerous) and the architectural solution (off-heap memory), we can finally talk about the tool itself: the `Buffer`.
 

@@ -1,9 +1,5 @@
 # Node.js Process Lifecycle
 
-> [!WARNING]
->
-> You've received an early-access to this chapter. Your feedback is invaluable, so please share your thoughts in the comment section at the bottom.
-
 Alright, let's talk about the Node.js process lifecycle.
 
 And I know what you're thinking. "Lifecycle? Isn't that some boring, academic thing?" Most engineers think a Node service is just one command: `node server.js`. They assume `require()` is free, `process.exit()` is a clean way to stop, and a single `SIGTERM` handler is all you need for "graceful shutdown."

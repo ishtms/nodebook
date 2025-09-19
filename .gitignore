@@ -1,6 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+src/content/misc
+public/_pagefind
+CLAUDE.md
 .vercelignore
-public/*
 # dependencies
 /node_modules
 /.pnp
