@@ -242,7 +242,7 @@ The phase 1 is the parsing (aka **Construction**) phase. When Node encounters an
 >
 > It's important to note that the dynamic `import()` and other runtime resolution mechanisms (conditional imports, loaders) introduce runtime graph changes and may not be known at construction time.
 
-> Phase 2 is for instantiation. This is the magic part. Once it has the full graph, Node walks through it and allocates memory for all the exported variables. It then "wires up" the imports to point to the memory locations of the exports. Think of it like creating a bunch of pointers. The `exportedThing` in `moduleA.js` and the `importedThing` in `moduleB.js` now point to the _exact same spot in memory_. They are live bindings, not copies. But - and this is key - they don't have any values yet.
+Phase 2 is for instantiation. This is the magic part. Once it has the full graph, Node walks through it and allocates memory for all the exported variables. It then "wires up" the imports to point to the memory locations of the exports. Think of it like creating a bunch of pointers. The `exportedThing` in `moduleA.js` and the `importedThing` in `moduleB.js` now point to the _exact same spot in memory_. They are live bindings, not copies. But - and this is key - they don't have any values yet.
 
 The final phase is the **Evaluation** phase. _Now_, finally, Node starts executing the code. It runs the code in each module to "fill in the blanks" for the exported values it already allocated memory for. Because it has the full dependency graph, it can be smart and start evaluating from the bottom up; modules with no dependencies go first.
 
