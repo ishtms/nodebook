@@ -15,7 +15,6 @@ function handleSensitiveRequest() {
 // Another function, perhaps handling a different request,
 // makes the mistake of using allocUnsafe.
 function handleUnsafeOperation() {
-  // A developer thought they were optimizing.
   // The size is chosen to be similar to the secret buffer's size.
   const unsafeBuffer = Buffer.allocUnsafe(150);
 

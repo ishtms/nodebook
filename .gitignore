@@ -4,6 +4,8 @@ src/app/globals.css
 src/content/misc
 public/_pagefind
 CLAUDE.md
+curriculum.md
+compiler/
 .vercelignore
 # dependencies
 /node_modules
@@ -37,6 +39,8 @@ src/app
 package-lock.json
 postcss.config.mjs
 tailwind.config.js
+tailwind.docs.config.js
+package.json
 next-sitemap.config.js
 next.config.mjs
 

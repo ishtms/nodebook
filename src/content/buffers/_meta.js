@@ -5,6 +5,11 @@ export default {
 
   "allocation-patterns": {
     title: "Buffer Allocation Patterns",
-    display: "hidden",
+  },
+  "working-with-buffers": {
+    title: "Working with buffers",
+  },
+  "fragmentation-and-challenges": {
+    title: "Memory Fragmentation and Exercises",
   },
 };

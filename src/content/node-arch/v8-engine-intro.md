@@ -500,11 +500,11 @@ console.timeEnd("Polymorphic");
 console.log(mono_sum, poly_sum);
 ```
 
-On my machine running Node.js v23, the results are obvious (your results may vary):
-`Monomorphic: 16.05ms`
-`Polymorphic: 47.23ms`
+On my machine running Node.js v24, the results are obvious (your results may vary):
+`Monomorphic: 11.52ms`
+`Polymorphic: 31.97ms`
 
-The polymorphic version is nearly **3x slower**. And that's with only _two_ shapes. Imagine a function that receives objects from five different sources, each with a slightly different structure. That call site will become megamorphic, and the performance penalty could easily be 10-50x.
+The polymorphic version is nearly **2.8x slower**. And that's with only _two_ shapes. Imagine a function that receives objects from five different sources, each with a slightly different structure. That call site will become megamorphic, and the performance penalty could easily be 10-50x.
 
 The goal is to write functions that operate on predictable data structures. When you see a function that can receive "either a User object or a Company object," your performance senses should be tingling. It might be better to have two separate, monomorphic functions: `processUser(user)` and `processCompany(company)`. Boring, repetitive code is often the fastest code.
 

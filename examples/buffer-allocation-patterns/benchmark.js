@@ -1,4 +1,4 @@
-const { performance } = require("node:perf_hooks");
+import { performance } from "node:perf_hooks";
 
 const ITERATIONS = 10000;
 

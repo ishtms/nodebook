@@ -1,9 +1,5 @@
 # Buffer Allocation Patterns
 
-> [!WARNING]
->
-> You've received an early-access to this chapter. Your feedback is invaluable, so please share your thoughts in the comment section at the bottom.
-
 ## TL;DR - for the impatient
 
 Now that you have an idea about what a `Buffer` is, let's take this understanding forward - in a more practical way. Let's suppose your service is either leaking secrets or running slower than a sloth in molasses because of how you're allocating Buffers. How do you identify the cause?
@@ -31,13 +27,12 @@ You pull up the logs for the user's request. There's an error, but it's not what
 How is this even possible? You trace the code from the invoice generation to the downstream API call. It's a simple workflow. Generate HTML for the invoice, convert it to a PDF stream, buffer the stream, and send it. You find the line where the buffer for the outbound request is created.
 
 ```javascript
-// A developer thought this was a good performance optimization.
 const payloadBuffer = Buffer.allocUnsafe(estimatedSize);
 ```
 
 `Buffer.allocUnsafe`. But why? You know what "unsafe" means in this context. It doesn't mean "might throw an error." It means "contains uninitialized memory." It means you asked the operating system for a chunk of memory, and it gave you a pointer to a location that was just used by something else, without bothering to clean it up first. In this case, "something else" was a different request handler that had just finished processing another user's authenticated request. Their JWT was still sitting in that memory segment.
 
-Your code calculated the `estimatedSize` incorrectly. It was too large. Your application wrote the valid invoice data into the beginning of the buffer but never overwrote the garbage at the end. And then it sent that entire buffer—your data plus another user's secrets—to the downstream service. And logged it.
+Your code calculated the `estimatedSize` incorrectly. It was too large. Your application wrote the valid invoice data into the beginning of the buffer but never overwrote the garbage at the end. And then it sent that entire buffer - your data plus another user's secrets - to the downstream service. And logged it.
 
 You start searching the logs for "bearer" and "password". The results scroll for what feels like an eternity. You've been leaking fragments of user secrets for months, ever since that "performance optimization" was checked in. Every time a buffer was allocated with `allocUnsafe` and not fully written to, you were playing Russian Roulette with your users' data. Tonight, the bullet landed. This isn't just a bug, instead it's a full-blown security breach, born from a single, misunderstood line of code.
 
@@ -72,15 +67,15 @@ The output will look something like this -
 
 ```json
 {
-  "rss": 33603584,
-  "heapTotal": 4161536,
-  "heapUsed": 2548712,
-  "external": 53515169,
+  "rss": 39845888,
+  "heapTotal": 5341184,
+  "heapUsed": 3638280,
+  "external": 53790468,
   "arrayBuffers": 52439315
 }
 ```
 
-Look at `heapUsed` versus `external`. The V8 heap is only using about 2.54 MB for the script's objects. But the `external` property shows the ~53 MB we allocated for our buffer. That's the off-heap memory in action.
+Look at `heapUsed` versus `external`. The V8 heap is only using about 3.64 MB for the script's objects. But the `external` property shows the ~53 MB we allocated for our buffer. That's the off-heap memory in action.
 
 This is also where the danger of `allocUnsafe` comes from. The memory managed by the V8 heap is always zeroed-out for security reasons when a new object is created. V8 will not show you leftover data from other objects. But the off-heap memory that Node manages is a different story. It's closer to the metal. When you use `allocUnsafe`, Node asks the OS for memory and just passes you the pointer. It skips the step of clearing that memory. The runtime allocator, for performance reasons, doesn't clear memory when it's **freed\*.** It just marks it as "available." So you get whatever was there last. This is the fundamental architectural detail that creates the security risks we're about to explore.
 
@@ -267,7 +262,7 @@ sanitizeFileInMemory(arrayBuffer);
 
 Your `headerBuffer` looks correct at first. You read the magic numbers and determine it's a JPEG file. But while you're processing it, the `sanitizeFileInMemory` function runs. It modifies the original `arrayBuffer` directly. Because your `headerBuffer` is just a view into that _same memory_, its contents are now silently changed out from under you.
 
-Suddenly, your file type detection logic fails intermittently. Data you thought was constant and immutable has been corrupted by a completely different part of your application. This is a nightmare to debug. There are no errors, no crashes—just inconsistent results. You might spend days chasing race conditions in your logic, when the root cause is a misunderstanding of whether `Buffer.from()` is performing a copy or creating a shared-memory view.
+Suddenly, your file type detection logic fails intermittently. Data you thought was constant and immutable has been corrupted by a completely different part of your application. This is a nightmare to debug. There are no errors, no crashes - just inconsistent results. You might spend days chasing race conditions in your logic, when the root cause is a misunderstanding of whether `Buffer.from()` is performing a copy or creating a shared-memory view.
 
 Let's walk through the sequence of events to understand how this can cause issues.
 
@@ -324,7 +319,7 @@ Let's revisit our JWT leak scenario with this knowledge.
 1.  **Request 1** comes in for User A. Your code creates a 200-byte Buffer to hold their session data. This buffer is sliced from the 8KB internal pool.
 2.  The request finishes. The session buffer is no longer referenced and becomes eligible for garbage collection. Its 200-byte slice within the pool is now considered "free." The data (the JWT) is still sitting there.
 3.  **Request 2** comes in for User B, milliseconds later. Your code calls `Buffer.allocUnsafe(500)`.
-4.  Node sees this is less than 8KB and goes to the pool. It finds a free slot—perhaps the very same 200-byte slice from Request 1, plus the 300 bytes next to it—and gives it to you.
+4.  Node sees this is less than 8KB and goes to the pool. It finds a free slot - perhaps the very same 200-byte slice from Request 1, plus the 300 bytes next to it - and gives it to you.
 5.  Your `allocUnsafe` buffer now contains, as its first 200 bytes, the complete session data for User A.
 
 This isn't a theoretical risk. It's the mechanism by which your application will leak its own secrets to itself. The pool turns your application's memory space into a tiny, high-speed ecosystem of data recycling. Using `allocUnsafe` is like drinking from that recycling system without filtering it first.
@@ -400,48 +395,48 @@ console.log(`- Buffer.from(1MB buffer, copy): ${(end - start).toFixed(2)}ms`);
 This is the case where buffer pooling is active.
 
 ```
-- Buffer.alloc(100) x 10000: 3.17ms
-- Buffer.allocUnsafe(100) x 10000: 1.03ms
+- Buffer.alloc(100) x 10000: 3.11ms
+- Buffer.allocUnsafe(100) x 10000: 1.23ms
 ```
 
-Here, `allocUnsafe` is about **3.1 times faster**. The cost of zero-filling 100 bytes is small, but repeated 10,000 times, it adds up. `allocUnsafe` just grabs a slice from the pre-allocated pool, which is extremely fast.
+Here, `allocUnsafe` is about **2.5 times faster**. The cost of zero-filling 100 bytes is small, but repeated 10,000 times, it adds up. `allocUnsafe` just grabs a slice from the pre-allocated pool, which is extremely fast.
 
 ### Scenario 2 - Medium Allocations (10KB)
 
 This is just above the default 8KB pool size, so every allocation has to go to the OS.
 
 ```
-- Buffer.alloc(10240) x 10000: 10.27ms
-- Buffer.allocUnsafe(10240) x 10000: 6.06ms
+- Buffer.alloc(10240) x 10000: 9.65ms
+- Buffer.allocUnsafe(10240) x 10000: 12.84ms
 ```
 
-The gap is still significant, with `allocUnsafe` being about **1.7 times faster**. Here, the overhead is a mix of the `malloc` call itself and the time spent zero-filling the 10KB of memory.
+Interestingly, in this case `allocUnsafe` is actually **1.3 times slower** on this system. Here, the overhead is a mix of the `malloc` call itself and the time spent zero-filling the 10KB of memory.
 
 ### Scenario 3 - Large Allocations (1MB)
 
 This is where you're handling file uploads, video streams, or other large binary data.
 
 ```
-- Buffer.alloc(1048576) x 10000: 366.00ms
-- Buffer.allocUnsafe(1048576) x 10000: 76.75ms
+- Buffer.alloc(1048576) x 10000: 1151.15ms
+- Buffer.allocUnsafe(1048576) x 10000: 988.47ms
 ```
 
-Now look at that. `Buffer.allocUnsafe` is **4.8 times faster**. This is a major performance difference. The cost of asking the OS for a megabyte of memory is dwarfed by the cost of writing zeros to all 1,048,576 bytes of it. 366ms is a huge amount of time to spend just allocating memory. If this is in the path of a user request, you've just added significant latency for no reason other than memory initialization.
+Now look at that. `Buffer.allocUnsafe` is **1.2 times faster**. This is a notable performance difference, though less dramatic than on some systems. The cost of asking the OS for a megabyte of memory is still dwarfed by the cost of writing zeros to all 1,048,576 bytes of it. 1151ms is a huge amount of time to spend just allocating memory. If this is in the path of a user request, you've just added significant latency for no reason other than memory initialization.
 
-When a profiler tells you that you're spending 80% of your CPU time in `Buffer.alloc`, a nearly 5x speedup looks incredibly tempting. It feels like free performance. But as we've established, the cost isn't paid in CPU cycles; it's paid in security risk.
+When a profiler tells you that you're spending 80% of your CPU time in `Buffer.alloc`, even a 1.2x speedup can be tempting. It feels like free performance. But as we've established, the cost isn't paid in CPU cycles; it's paid in security risk.
 
 ### `Buffer.from()` Performance
 
 What about `Buffer.from()`? Its performance is entirely dependent on the source.
 
 ```
-- Buffer.from(1MB string): 2.27ms
-- Buffer.from(1MB buffer, copy): 0.14ms
+- Buffer.from(1MB string): 1.42ms
+- Buffer.from(1MB buffer, copy): 0.24ms
 ```
 
-Creating a 1MB buffer from a 1MB string takes about **2.27ms**. This is the cost of UTF-8 encoding and copying.
+Creating a 1MB buffer from a 1MB string takes about **1.42ms**. This is the cost of UTF-8 encoding and copying.
 
-Copying an existing 1MB buffer takes only **0.14ms**. This is a highly optimized `memcpy` operation. It's incredibly fast, but still a cost to be aware of if you're doing it in a loop.
+Copying an existing 1MB buffer takes only **0.24ms**. This is a highly optimized `memcpy` operation. It's incredibly fast, but still a cost to be aware of if you're doing it in a loop.
 
 These numbers give you a mental model for making decisions. Is your allocation size small? The performance difference is likely negligible. Is it large? The difference is massive, and you need to think carefully. Is the allocation on a hot path that runs thousands of times per second? Even small differences can add up. The only way to know for sure is to **profile your application under realistic load**. Don't guess. Don't optimize prematurely. Measure, identify the bottleneck, and then use these numbers to understand the trade-offs of your solution.
 
