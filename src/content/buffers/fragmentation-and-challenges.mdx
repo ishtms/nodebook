@@ -1,0 +1,494 @@
+import MemoryFragmentationViz from "../../components/chapters/MemoryFragmentationViz";
+
+# Fragmentation & Buffer code challenges
+
+Alright, we've covered a lot of ground. You now have a solid mental model of what a `Buffer` is, where it lives in memory, and the critical distinction between a view and a copy. You've seen the raw power of zero-copy operations and the leaks they can cause if you're not careful. We've talked about the internal buffer pool and how Node.js cleverly optimizes small, frequent allocations to avoid the performance penalty of constant system calls.
+
+This chapter is where it all comes together. We're going to dive deep into a classic, low-level problem that most JavaScript developers never have to think about: **memory fragmentation**. It's an issue that feels abstract until it crashes your production server with a cryptic out-of-memory error, even when your monitoring dashboards swear you have plenty of RAM available. We'll dissect what it is, why it happens, and how Node's memory architecture both helps and sometimes hinders the situation.
+
+Then, we're shifting gears. The second, larger part of this chapter is dedicated to a bunch of comprehensive code challenges. This chapter is about taking everything we've discussed - from byte-level interpretation and endianness to the view-vs-copy trade-off and buffer pooling - and applying it to solve real-world problems. You'll build a binary protocol parser, profile memory usage to see the leaks for yourself, implement a stateful stream processor, and even construct your own application-level buffer pool.
+
+I'm not giving you the answers here. Reading is one thing; doing is another. By the end of this chapter, you won't just _know_ about Buffers. You'll have the experience to prove you can wield them effectively, safely, and efficiently in a high-performance production environment, not just in Node.js but any other language that is thrown at you.
+
+## Memory Fragmentation
+
+> [!TIP]
+>
+> Want to dive deeper into memory fundamentals? Check out my blog post on [Memory: The Stack & Heap](https://www.ishtms.com/blog/basic-system-concepts/memory-stack-heap), where I cover everything from how RAM and virtual memory work, to stack frames and heap allocation, cache performance, common memory issues (leaks, dangling pointers, fragmentation), and why different languages choose different memory management strategies.
+
+Memory fragmentation is one of the silent killers of long-running applications. The core concept is simple: your application's memory becomes broken up into many small, non-contiguous chunks over time. The total amount of free memory might be large, but if it's scattered in thousands of tiny pieces, it's useless for satisfying a large allocation request. You can have 100MB of free RAM available to your process, but if you ask for a single 1MB buffer, the request can fail because there isn't a single, unbroken 1MB block of free memory anywhere.
+
+To really get this, we have to talk about how the operating system gives memory to your Node.js process.
+
+### Virtual vs. Physical Memory
+
+Your Node.js process doesn't directly interact with your computer's physical RAM sticks. Instead, it operates within a **virtual address space**. This is a massive, contiguous address range that the operating system provides to every process. On a 64-bit system, this address space is huge - theoretically 16 exabytes. It's a clean, linear abstraction. When your code asks for memory, the OS finds a free chunk within this virtual address space and gives it to your process.
+
+Behind the scenes, the Memory Management Unit (MMU), a piece of hardware in your CPU, works with the OS to map these virtual addresses to actual physical addresses in RAM. This mapping happens in chunks called **pages**, which are typically 4KB in size. This system is what allows for magic like swapping memory to disk and preventing processes from stomping on each other's memory.
+
+The important takeaway here is that when Node.js allocates a large buffer, it's asking the OS for a contiguous block of _virtual_ memory. The OS then has the job of finding enough free _physical_ memory pages to back that virtual allocation.
+
+### The Allocator's Dilemma
+
+When you call `Buffer.alloc(65536)` to get a 64KB buffer for a file read, Node.js bypasses its internal 8KB pool. It needs to get this memory from the system. It does this via system calls like `mmap` on Linux/macOS or `VirtualAlloc` on Windows. The system's memory allocator (like `glibc`'s `malloc` on Linux) finds a suitable 64KB block in your process's virtual address space and maps it.
+
+Now, your code processes the file, and eventually, that 64KB buffer is no longer referenced. The V8 garbage collector reclaims the JavaScript handle, and Node's C++ layer is notified to free the underlying memory. It calls `munmap` or `free`, returning that 64KB block to the system allocator.
+
+The problem starts when your application does this thousands of times with buffers of varying sizes. This constant allocation and deallocation, especially with different sizes, is what chews up your memory space. It's like taking a whole sheet of paper, cutting out a 5-inch square, then a 2-inch square, then putting the 5-inch square back, then cutting out a 3-inch square. After a while, the paper is full of holes. You might have enough total paper left, but you can't cut out a new 6-inch square.
+
+This leads to two types of fragmentation: **External Fragmentation** and **Internal Fragmentation.**
+
+1.  **External Fragmentation** is the scenario we've been describing. There is enough total free memory, but it's divided into many non-contiguous blocks (holes). A new allocation request fails because no single hole is large enough. This is the primary concern for applications that allocate and free many large, non-pooled buffers.
+
+2.  **Internal Fragmentation** is a more subtle problem. It happens when memory is allocated in fixed-size chunks, and an allocation request is satisfied by a chunk larger than the request. For example, if an allocator only deals in blocks of 32, 64, and 128 bytes, and you request 33 bytes, it will give you a 64-byte block. The remaining 31 bytes are wasted. They are allocated but unused - a hole _inside_ your allocated block. Node's internal 8KB buffer pool is a perfect example of a system that can cause internal fragmentation. If it satisfies hundreds of 10-byte requests from its 8KB slab, a significant portion of that slab might be "wasted" in the gaps between allocations. However, this is a conscious trade-off made to prevent external fragmentation and reduce system call overhead, and it's generally a very effective one.
+
+<MemoryFragmentationViz />
+**A new request comes in, needing a 1.2MB buffer for a database dump.**
+
+The allocation fails. Even though you have well over 1.2MB of total free memory, there is no single block large enough to satisfy the request. This is external fragmentation in action. In a real server running for days, this process repeats thousands of times, leaving the memory space looking like Swiss cheese. Eventually, a critical allocation fails, and your application crashes with an `ENOMEM` (Out of Memory) error.
+
+### What can I do... ?
+
+The risk of fragmentation emerges when you work with buffers that are too large for the pool (larger than 4KB by default). If your application allocates and frees many large buffers of varying sizes, it's acting like a chaotic memory client. This churn is what gradually chops up the free memory available to your Node.js process.
+
+So, how do you fight this? You can't change how the OS allocator works, but you can change how your application _behaves_. The key is to reduce memory churn.
+
+#### Buffer Reuse
+
+This is the single most powerful technique for reducing allocation churn. Instead of allocating a new buffer for every task, you allocate a single, larger buffer upfront and reuse it. This is especially critical in hot paths of your code, like inside a network `data` event handler or a tight loop.
+
+Let's imagine a server that processes incoming TCP packets. Each packet needs to be framed with a 4-byte length header.
+
+**The Bad, High-Churn Approach**
+
+```javascript
+// BAD
+// This code allocates two new buffers for every single data chunk,
+// creating massive memory churn and risking fragmentation over time.
+socket.on("data", (chunk) => {
+  // Allocation #1: New header buffer
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(chunk.length, 0);
+
+  // Allocation #2: Buffer.concat creates a new buffer and copies data
+  const framedPacket = Buffer.concat([header, chunk]);
+  sendToNextService(framedPacket);
+});
+```
+
+If this server handles 10,000 packets per second, that's 20,000 buffer allocations per second (though Node's small-buffer pool may optimize some of these). The garbage collector will be working overtime, and the memory allocator will be struggling to keep up, leading to potential fragmentation.
+
+**A Better, Reusable Approach**
+
+```javascript
+// BETTER (but see "shared memorey hazard" section below!)
+// A single, larger buffer is allocated once and reused.
+const MAX_PACKET_SIZE = 65536; // 64KB
+const reusableBuffer = Buffer.alloc(MAX_PACKET_SIZE);
+
+socket.on("data", (chunk) => {
+  const framedPacketLength = chunk.length + 4;
+
+  if (framedPacketLength > MAX_PACKET_SIZE) {
+    console.error("Packet too large for reusable buffer!");
+    return;
+  }
+
+  // No new backing buffer allocation. Write header into our existing buffer.
+  reusableBuffer.writeUInt32BE(chunk.length, 0);
+
+  // No new backing buffer allocation. Copy packet data after the header.
+  chunk.copy(reusableBuffer, 4);
+
+  // Create a view over the valid data. This creates a small Buffer wrapper
+  // object but shares the underlying memory (zero-copy of bytes).
+  const framedPacketView = reusableBuffer.subarray(0, framedPacketLength);
+
+  sendToNextService(framedPacketView);
+});
+```
+
+In this version, we've eliminated the large backing-memory allocations (from two per packet to zero per packet). While we do create a small Buffer wrapper object for the view, we've removed the expensive memory allocation and copying that `Buffer.concat` performs. The performance difference is significant.
+
+**Shared Memory Hazard**
+
+The optimization above has a **serious issue** that can cause data corruption if not handled correctly. The `framedPacketView` created by `subarray()` shares the underlying memory with `reusableBuffer`.
+
+**If `sendToNextService` is asyync** (which is typical for network operations, queuing systems, or pipelines), and you immediately handle the next packet, you'll **overwrite the buffer contents while the previous consumer is still reading it**. This causes silent data corruption.
+
+This approach is only safe when the consumer uses the data synchronously before the function returns (rare), or you coordinate buffer lifetimes carefully.
+
+**Safer Alternative? A Buffer Pool**
+
+For asynchronous consumers, use a ring buffer pool with multiple buffers:
+
+```javascript
+// SAFER: Ring buffer pool
+const POOL_SIZE = 32; // Must be >= max in-flight packets
+const MAX_PACKET_SIZE = 65536;
+const pool = Array.from({ length: POOL_SIZE }, () => Buffer.alloc(MAX_PACKET_SIZE));
+let poolIndex = 0;
+
+socket.on("data", (chunk) => {
+  const framedPacketLength = chunk.length + 4;
+
+  if (framedPacketLength > MAX_PACKET_SIZE) {
+    console.error("Packet too large!");
+    return;
+  }
+
+  // Get next buffer from pool (rotates through POOL_SIZE distinct buffers)
+  const buf = pool[poolIndex];
+  poolIndex = (poolIndex + 1) % POOL_SIZE;
+
+  buf.writeUInt32BE(chunk.length, 0);
+  chunk.copy(buf, 4);
+
+  // Safe because we won't reuse this specific buffer until
+  // we've cycled through all POOL_SIZE buffers
+  const framedPacketView = buf.subarray(0, framedPacketLength);
+  sendToNextService(framedPacketView);
+});
+```
+
+The pool gives each in-flight packet its own distinct backing buffer, preventing overwrites as long as `POOL_SIZE` is large enough to accommodate your maximum concurrent operations.
+
+So, in case (you probably won't) ever run into the issue, how would you decide when to Use which approach -
+
+- **Single reusable buffer** only if consumers are truly synchronous (very rare)
+- **Buffer pool** for asynchronous consumers with bounded concurrency
+- **Copy to new buffer** if you can't bound in-flight work, copy the data to a new buffer at send time (e.g., `Buffer.from(framedPacketView)`) - this costs an allocation per packet but is simple and safe
+
+> [!IMPORTANT]
+>
+> Node.js has an internal buffer pool for small allocations, so tiny buffers may already benefit from some optimization. You still pay CPU cost to copy bytes with `chunk.copy()` - you're trading allocation cost for CPU copy cost (usually worth it in GC-sensitive hot paths)
+
+The key takaway is - buffer reuse can dramatically improve performance, but shared memory requires careful lifetime management to avoid corruption.
+
+Understanding fragmentation is about seeing `Buffer.alloc()` not as a cheap operation, but as a request that has a real cost, a cost that accumulates over the lifetime of a server. By consciously designing your application to reduce this churn through reuse and pooling, you can build systems that are not just fast, but stable and resilient enough to run for months or years without issue.
+
+## Code Challenges
+
+Theory is important, but there's no substitute for getting your hands dirty. I've created the challenges below to take the concepts from the previous chapters and force you to apply them in a practical context. Each challenge builds on the last, increasing in complexity and trying to be pretty close to the real-world problems you'll face when working with binary data in Node.js.
+
+I am not providing the solutions. The goal is for you to build them. Struggle with the code. Consult the Node.js documentation. The insights you gain from building a working solution yourself are worth far more than anything you can get from copy-pasting an answer.
+
+Let's begin.
+
+### Challenge \#1: The Fixed-Size Binary Protocol Parser
+
+Imagine you're working on an IoT project. A fleet of sensors sends data packets over TCP to your Node.js server. The protocol is simple and fixed-size. Every packet is exactly 24 bytes long and has the following structure:
+
+| Offset (Bytes) | Length (Bytes) | Data Type   | Description                |
+| :------------- | :------------- | :---------- | :------------------------- |
+| 0-3            | 4              | `UInt32BE`  | Sensor ID                  |
+| 4-11           | 8              | `Float64BE` | Timestamp (Unix epoch, ms) |
+| 12-13          | 2              | `UInt16BE`  | Sensor Type Code           |
+| 14             | 1              | `UInt8`     | Status Flags (a bitmask)   |
+| 15             | 1              | `Int8`      | Temperature (°C)           |
+| 16-19          | 4              | `Float32BE` | Humidity (%)               |
+| 20-23          | 4              | `Float32BE` | Pressure (kPa)             |
+
+#### Your Task
+
+Write a Node.js function called `parseSensorData` that accepts a 24-byte `Buffer` as input. The function should parse the buffer according to the specification above and return a JavaScript object with the decoded values.
+
+Use this sample `Buffer` to test your function.
+
+```javascript
+const samplePacket = Buffer.from([
+  0x00,
+  0x00,
+  0x01,
+  0xa4, // Sensor ID: 420
+  0x41,
+  0xd9,
+  0x5c,
+  0x38,
+  0x2d,
+  0x5b,
+  0x81,
+  0x24, // Timestamp: 1672531200000
+  0x00,
+  0x01, // Sensor Type: 1 (Thermometer)
+  0x05, // Status Flags: 00000101 (Bit 0 and Bit 2 are set)
+  0x19, // Temperature: 25°C
+  0x42,
+  0x48,
+  0x00,
+  0x00, // Humidity: 50.0
+  0x42,
+  0xc8,
+  0x66,
+  0x66, // Pressure: 100.2
+]);
+```
+
+**The Goal**
+
+Your `parseSensorData(samplePacket)` function should return an object that looks like this:
+
+```json
+{
+  "sensorId": 420,
+  "timestamp": 1672531200000,
+  "sensorType": 1,
+  "statusFlags": 5,
+  "temperature": 25,
+  "humidity": 50,
+  "pressure": 100.19999694824219
+}
+```
+
+> [!NOTE]
+>
+> Floating point precsion might cause slight variations in the last decimal places, which is normal.
+
+**Things to Consider**
+
+- Which `Buffer` methods will you need for each field? The method names are very descriptive.
+- Pay close attention to the data types (`UInt`, `Int`, `Float64`/`Double`, `Float32`/`Float`) and the endianness (`BE` - Big Endian).
+- The offset for each read is critical. This is a fixed-size protocol, so the offsets are constant.
+- Good practice dictates you should validate the input buffer's length before attempting to parse it.
+
+### Challenge #2: The View vs. Copy Memory Profiler
+
+We've talked at length about the memory retention issue where a small `Buffer` view can hold a massive parent buffer hostage. It's time to prove it to yourself with code.
+
+#### Your Task
+
+Write a Node.js program that demonstrates and quantifies this memory leak. The script should perform two separate tests:
+
+1.  **The "View" Test**
+    - Allocate a single, large `Buffer` (e.g., 50MB).
+    - In a loop, create a large number of small _views_ (e.g., 100,000 views of 16 bytes each) from this large buffer using `buf.slice()` or `buf.subarray()` (preferred).
+    - Store these views in an array so they are not garbage collected.
+    - After the loop, log the memory usage using `process.memoryUsage()`. Pay close attention to the `external` property.
+
+2.  **The "Copy" Test**
+    - Allocate a single, large `Buffer` of the same size (50MB).
+    - In a loop, create a large number of small _copies_ (e.g., 100,000 copies of 16 bytes each).
+    - Store these copies in an array.
+    - After the loop, ensure the original large buffer is eligible for garbage collection and, if possible, invoke the GC.
+    - Log the memory usage again.
+
+**The Goal**
+
+Your script's output should show a dramatic difference in the `external` memory reported by `process.memoryUsage()` between the two tests. The "View" test's external memory should be slightly over 50MB, while the "Copy" test's external memory should be much smaller.
+
+**Things to Consider**
+
+- You'll need to run your script with the `--expose-gc` flag to be able to call `global.gc()`. This makes the results much more deterministic.
+- Why is the `external` value in `process.memoryUsage()` the most important metric for this experiment? What do `rss` and `heapUsed` represent?
+- The total size of the copies is `100,000 * 16 bytes = 1.6MB`. Your result for the copy test should be in this ballpark.
+- A helper function to format the byte counts into KB/MB will make your output much easier to read.
+
+### Challenge \#3: The Stateful Streaming Parser (TLV Protocol)
+
+Your fixed-protocol from Challenge #1 was a success, but now you need to handle a more complex, variable-length protocol. This is common in network applications. You'll be parsing a stream of messages formatted using a Type-Length-Value (TLV) encoding.
+
+The problem is, you're reading from a TCP stream. Data can arrive in arbitrary chunks. A single `data` event might contain multiple TLV messages, or just a partial message. Your parser needs to be stateful - it must hold onto partial data and wait for the rest of the message to arrive in the next chunk.
+
+#### The Protocol Specification
+
+Each TLV message has a 3-byte header followed by a variable-length value.
+
+| Offset (Bytes) | Length (Bytes) | Data Type  | Description                                     |
+| :------------- | :------------- | :--------- | :---------------------------------------------- |
+| 0              | 1              | `UInt8`    | Message **T**ype (a number from 1-255)          |
+| 1-2            | 2              | `UInt16BE` | **L**ength of the value part in bytes (0-65535) |
+| 3 to 3+L       | L              | `Buffer`   | The **V**alue (payload)                         |
+
+**Your Task**
+
+> [!NOTE]
+>
+> The [next chapter of **NodeBook** covers Streams](https://thenodebook.com/streams/intro-to-streams). If you haven't worked with Streams in Node or don't feel comfortable with them, feel free to skip this challenge. If you do want to continue, please read the Streams chapter before attempting the challenge. The introductory Streams chapter will be published before the challenges go live.
+
+Create a `TlvParser` class that extends `stream.Transform`. This class will be the core of your solution. It needs to:
+
+1.  Maintain an internal buffer for incomplete message chunks.
+2.  In its `_transform` method, append incoming data to the internal buffer.
+3.  Continuously try to parse complete TLV messages from its internal buffer.
+4.  If a full message is parsed, it should `push` a JavaScript object `{ type, value }` downstream. The `value` should be a _copy_ of the payload buffer.
+5.  The remaining unparsed data must be kept in the internal buffer for the next chunk.
+
+**Sample Data Stream**
+
+The data will arrive in chunks. Here's an example sequence -
+
+```javascript
+// A full message - Type 1, Length 5, Value "hello"
+const message1 = Buffer.from([0x01, 0x00, 0x05, 0x68, 0x65, 0x6c, 0x6c, 0x6f]);
+
+// A second message - Type 2, Length 8, Value "goodbye!"
+const message2 = Buffer.from([0x02, 0x00, 0x08, 0x67, 0x6f, 0x6f, 0x64, 0x62, 0x79, 0x65, 0x21]);
+
+// Let's simulate a messy TCP stream by chunking the data weirdly.
+const chunk1 = message1.subarray(0, 4); // Contains header and one byte of value
+const chunk2 = Buffer.concat([message1.subarray(4), message2.subarray(0, 6)]); // Contains rest of msg1 and start of msg2
+const chunk3 = message2.subarray(6); // Contains the rest of msg2
+```
+
+**The Goal**
+
+When you pipe these chunks through an instance of your `TlvParser`, it should emit two `data` events, producing these objects in order -
+
+1.  `{ type: 1, value: <Buffer 68 65 6c 6c 6f> }` (value is "hello")
+2.  `{ type: 2, value: <Buffer 67 6f 6f 64 62 79 65 21> }` (value is "goodbye\!")
+
+**Things to Consider**
+
+- How will you manage your internal buffer? `Buffer.concat` will be your best friend.
+- Your parsing loop needs to check if you have enough data for a header (3 bytes), then read the length, and then check if you have enough data for the full value.
+- Once a message is successfully parsed, how do you remove it from your internal buffer so you can parse the next one? `buf.subarray()` is the tool for this.
+- Why is it important for the parser to emit a _copy_ of the value buffer, not a view into its internal buffer? Think about what happens to the internal buffer over time.
+
+### Challenge #4: Implementing a Robust Buffer Pool
+
+Your video processing service is suffering from memory fragmentation. It constantly allocates and frees large (64KB) buffers, and after running for a few days, it crashes with out-of-memory errors. You've decided to implement a custom, application-level buffer pool to mitigate this churn.
+
+#### Your Task
+
+Create a `BufferPool` class. This class should be designed to manage a fixed number of pre-allocated buffers of a specific size.
+
+The class must have the following features -
+
+1.  **Constructor `(bufferSize, poolSize)`:**
+    - Takes the size of each buffer (e.g., 65536) and the number of buffers to keep in the pool (e.g., 100).
+    - It should pre-allocate all these buffers and store them, perhaps in an array.
+
+2.  **Method `get()`:**
+    - If the pool has an available buffer, it should return one.
+    - If the pool is empty, it should log a warning and allocate a new, temporary buffer of the correct size. This prevents the application from crashing but signals that the pool might be too small.
+    - It should return a `Buffer`.
+
+3.  **Method `release(buffer)`:**
+    - Takes a buffer that was previously acquired from the pool.
+    - Returns the buffer to the pool, making it available for the next `get()` call.
+    - It should have a check to prevent the pool from growing beyond its initial size (i.e., don't add buffers that weren't originally from the pool or extra ones created when the pool was empty).
+
+4.  **Property `used`:**
+    - A getter that returns the number of buffers currently checked out from the pool.
+
+**The Goal**
+
+Write the `BufferPool` class and then write a small simulation to test it. The simulation should:
+
+1.  Create a pool.
+2.  Get several buffers from it, checking the `used` count.
+3.  Release those buffers back to the pool.
+4.  Test the "pool empty" condition by trying to get more buffers than the pool size.
+5.  Test the `release` logic for an "extra" buffer that was created when the pool was empty.
+
+**Things to Consider**
+
+- What's the best data structure to hold the available buffers? An array with `push()` and `pop()` is simple and efficient.
+- How can you be sure a buffer being released is valid? You could add checks for its size or even tag the buffers in some way, though that's more advanced. For this challenge, a size check is sufficient.
+- In a real-world multi-threaded application (using worker threads), how would you need to change this class to make it thread-safe? (This is a thought experiment; you don't need to implement it for this challenge).
+- The `try...finally` block is your best friend when using this pool to ensure buffers are always released, even if errors occur.
+
+### Challenge \#5: The Mixed-Endianness `DataView` Parser
+
+You are interfacing with a legacy piece of hardware that uses a bizarre binary format. It mixes Big-Endian and Little-Endian byte orders within the same data packet. The `Buffer`'s standard `read*BE()` and `read*LE()` methods are great, but for maximum clarity and safety, you've decided to use a `DataView`.
+
+**The Protocol Specification**
+
+The packet is 16 bytes long.
+
+| Offset (Bytes) | Length (Bytes) | Data Type | Endianness | Description                            |
+| :------------- | :------------- | :-------- | :--------- | :------------------------------------- |
+| 0-1            | 2              | `UInt16`  | **Big**    | Packet Magic Number (must be `0xCAFE`) |
+| 2-5            | 4              | `Int32`   | **Little** | Device ID                              |
+| 6-9            | 4              | `Float32` | **Big**    | Voltage Reading                        |
+| 10             | 1              | `UInt8`   | N/A        | Status Code                            |
+| 11             | 1              | `UInt8`   | N/A        | Checksum                               |
+| 12-15          | 4              | `UInt32`  | **Little** | Uptime in seconds                      |
+
+#### Your Task
+
+Write a function `parseLegacyPacket(buffer)` that takes a 16-byte `Buffer`. Inside this function, you must create a `DataView` over the buffer's underlying `ArrayBuffer`. Use the `DataView` methods (`getUint16`, `getInt32`, `getFloat32`, etc.) to parse the packet according to the specification. Remember that `DataView` methods take an optional final boolean argument to specify endianness (`true` for little-endian, `false` for big-endian).
+
+**Sample Data**
+
+```javascript
+const legacyPacket = Buffer.from([
+  0xca,
+  0xfe, // Magic Number (BE)
+  0xad,
+  0xde,
+  0x00,
+  0x00, // Device ID: 57005 (LE)
+  0x40,
+  0xa0,
+  0x00,
+  0x00, // Voltage: 5.0 (BE)
+  0x01, // Status: 1 (OK)
+  0xb5, // Checksum
+  0x80,
+  0x51,
+  0x01,
+  0x00, // Uptime: 86400 (LE)
+]);
+```
+
+**The Goal**
+
+Your `parseLegacyPacket(legacyPacket)` function should return an object that looks like this:
+
+```json
+{
+  "magic": 60158,
+  "deviceId": 57005,
+  "voltage": 5,
+  "status": 1,
+  "checksum": 181,
+  "uptime": 86400
+}
+```
+
+**Things to Considr**
+
+- How do you get the underlying `ArrayBuffer` from a `Buffer` to create a `DataView`? Every `Buffer` instance has a `.buffer` property.
+- Be careful with the `byteOffset`. The `DataView` needs to be created with the correct offset if the `Buffer` is a slice of a larger `ArrayBuffer`. For this challenge, you can assume the buffer is not a slice, but it's good to be aware of the `buf.byteOffset` property.
+- The third argument to `DataView` methods is the endianness flag. `false` (or omitted) is Big-Endian. `true` is Little-Endian. You will need to use both.
+- This is a great exercise in careful, methodical parsing where every single byte and its interpretation matters.
+
+### Challenge #6 (Advanced): Thread-Safe Counter with `SharedArrayBuffer`
+
+> [!IMPORTANT]
+>
+> This is an advanced, optional challenge. If you haven’t worked with Node.js worker threads, shared memory, or `Atomics` before, feel free to skip it for now. Come back after you’ve read those chapters in the book. I'll add a link in the future chapters as a reminder for you to finish this challenge.
+
+You have a performance-critical application where multiple worker threads need to increment a shared counter. Passing messages back and forth to the main thread for every increment would be too slow due to serialization overhead. You need a way for all threads to access and modify the same piece of memory directly and safely.
+
+#### Your Task
+
+Write a script that demonstrates a thread-safe counter using a `SharedArrayBuffer` and `Atomics`.
+
+1.  **Main Script (`main.js`)**
+    - Create a `SharedArrayBuffer` large enough to hold one 32-bit integer (4 bytes).
+    - Create an `Int32Array` view over it.
+    - Initialize the counter at that memory location to 0.
+    - Create two `Worker` threads, passing the `SharedArrayBuffer` to each of them.
+    - Each worker will increment the counter a large number of times (e.g., 1 million).
+    - Wait for both workers to signal that they are finished.
+    - Read the final value from the `SharedArrayBuffer` using `Atomics.load()` and print it. The final value should be the sum of all increments (e.g., 2 million).
+
+2.  **Worker Script (`worker.js`)**
+    - Receive the `SharedArrayBuffer` via a message.
+    - Create its own `Int32Array` view over the shared buffer.
+    - In a tight loop, increment the shared counter using `Atomics.add()`. This is the key to thread safety.
+    - When the loop is done, send a 'done' message back to the main thread.
+
+**The Goal**
+
+The final output on the main thread should be `Final counter value: 2000000`. If you were to use a non-atomic operation like `view[0]++`, you would likely get a final value less than 2 million due to race conditions, where one worker's read-modify-write cycle overwrites another's.
+
+**Things to Consider**
+
+- This is the only challenge that requires two separate files.
+- `SharedArrayBuffer` is the core component that allows memory to be visible across threads.
+- Why is `Atomics.add(view, 0, 1)` required instead of `view[0]++`? Research what a "race condition" is in the context of a read-modify-write operation.
+- How does the main thread know when both workers are finished? You can use Promises to wait for the 'done' message from each worker. `Promise.all` is a good tool for this.
+- This demonstrates the absolute lowest-level and highest-performance way to share state between threads in Node.js, built directly on the memory primitives we've been studying.
