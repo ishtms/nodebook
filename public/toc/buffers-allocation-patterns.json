@@ -1,0 +1,127 @@
+[
+  {
+    "depth": 5,
+    "value": "TL;DR - for the impatient",
+    "id": "tldr-for-the-impatient"
+  },
+  {
+    "depth": 5,
+    "value": "You leaked passwords in un-initialized memory",
+    "id": "you-leaked-passwords-in-un-initialized-memory"
+  },
+  {
+    "depth": 5,
+    "value": "Understanding Buffer Memory Architecture",
+    "id": "understanding-buffer-memory-architecture"
+  },
+  {
+    "depth": 5,
+    "value": "Buffer.alloc()",
+    "id": "bufferalloc"
+  },
+  {
+    "depth": 5,
+    "value": "Buffer.allocUnsafe()",
+    "id": "bufferallocunsafe"
+  },
+  {
+    "depth": 5,
+    "value": "Buffer.from()",
+    "id": "bufferfrom"
+  },
+  {
+    "depth": 5,
+    "value": "Buffer Pooling and the 8KB Secret",
+    "id": "buffer-pooling-and-the-8kb-secret"
+  },
+  {
+    "depth": 5,
+    "value": "Let's measure the performance",
+    "id": "lets-measure-the-performance"
+  },
+  {
+    "depth": 3,
+    "value": "Scenario 1 - Small Allocations (100 bytes)",
+    "id": "scenario-1-small-allocations-100-bytes"
+  },
+  {
+    "depth": 3,
+    "value": "Scenario 2 - Medium Allocations (10KB)",
+    "id": "scenario-2-medium-allocations-10kb"
+  },
+  {
+    "depth": 3,
+    "value": "Scenario 3 - Large Allocations (1MB)",
+    "id": "scenario-3-large-allocations-1mb"
+  },
+  {
+    "depth": 3,
+    "value": "Buffer.from() Performance",
+    "id": "bufferfrom-performance"
+  },
+  {
+    "depth": 5,
+    "value": "Security Implications and Attack Vectors",
+    "id": "security-implications-and-attack-vectors"
+  },
+  {
+    "depth": 3,
+    "value": "Direct Information Disclosure (The Obvious One)",
+    "id": "direct-information-disclosure-the-obvious-one"
+  },
+  {
+    "depth": 3,
+    "value": "Leaking Cryptographic Material",
+    "id": "leaking-cryptographic-material"
+  },
+  {
+    "depth": 3,
+    "value": "Denial of Service (DoS) via Buffer.from()",
+    "id": "denial-of-service-dos-via-bufferfrom"
+  },
+  {
+    "depth": 3,
+    "value": "Timing Attacks",
+    "id": "timing-attacks"
+  },
+  {
+    "depth": 5,
+    "value": "Memory Fragmentation and GC Pressure",
+    "id": "memory-fragmentation-and-gc-pressure"
+  },
+  {
+    "depth": 3,
+    "value": "Garbage Collector Pressure",
+    "id": "garbage-collector-pressure"
+  },
+  {
+    "depth": 3,
+    "value": "Memory Fragmentation",
+    "id": "memory-fragmentation"
+  },
+  {
+    "depth": 5,
+    "value": "Platform Differences and Allocator Behavior",
+    "id": "platform-differences-and-allocator-behavior"
+  },
+  {
+    "depth": 5,
+    "value": "Production Decision Framework",
+    "id": "production-decision-framework"
+  },
+  {
+    "depth": 5,
+    "value": "Migration Patterns and Safer Defaults",
+    "id": "migration-patterns-and-safer-defaults"
+  },
+  {
+    "depth": 5,
+    "value": "Re-cap on the best practices",
+    "id": "re-cap-on-the-best-practices"
+  },
+  {
+    "depth": 5,
+    "value": "Closing",
+    "id": "closing"
+  }
+]

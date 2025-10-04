@@ -7,6 +7,7 @@ import { Head } from "nextra/components";
 import { getPageMap } from "nextra/page-map";
 import "katex/dist/katex.min.css";
 import "../docs.css";
+import MobileTocButton from "@/components/MobileTocButton";
 const bricolageGrotesque = Bricolage_Grotesque({
   subsets: ["latin"],
   weight: ["300", "400", "500", "600", "700", "800"],
@@ -199,7 +200,9 @@ export default async function DocsLayout({ children, ...params }) {
                 logoLink="/"
                 logo={<Image className="rounded-full" src="/logo.jpg" alt="Logo" width={32} height={32} />}
                 projectLink="https://github.com/ishtms/nodebook"
-              ></Navbar>
+              >
+                <MobileTocButton />
+              </Navbar>
             </>
           }
         >

@@ -1,0 +1,237 @@
+[
+  {
+    "depth": 5,
+    "value": "TL;DR",
+    "id": "tldr"
+  },
+  {
+    "depth": 5,
+    "value": "The 100x Slowdown Mystery",
+    "id": "the-100x-slowdown-mystery"
+  },
+  {
+    "depth": 5,
+    "value": "How V8 Actually Executes JavaScript",
+    "id": "how-v8-actually-executes-javascript"
+  },
+  {
+    "depth": 3,
+    "value": "Myth 1: \"V8 is just an interpreter\"",
+    "id": "myth-1-v8-is-just-an-interpreter"
+  },
+  {
+    "depth": 5,
+    "value": "The Compilation Pipeline: Ignition to TurboFan",
+    "id": "the-compilation-pipeline-ignition-to-turbofan"
+  },
+  {
+    "depth": 3,
+    "value": "Ignition's Role: Baseline Performance",
+    "id": "ignitions-role-baseline-performance"
+  },
+  {
+    "depth": 3,
+    "value": "Sparkplug: The Fast Baseline",
+    "id": "sparkplug-the-fast-baseline"
+  },
+  {
+    "depth": 3,
+    "value": "Maglev: The Mid-Tier Optimizer",
+    "id": "maglev-the-mid-tier-optimizer"
+  },
+  {
+    "depth": 3,
+    "value": "TurboFan's Trigger: The Hotness Counter",
+    "id": "turbofans-trigger-the-hotness-counter"
+  },
+  {
+    "depth": 3,
+    "value": "TurboFan's Speculative Optimization",
+    "id": "turbofans-speculative-optimization"
+  },
+  {
+    "depth": 5,
+    "value": "Hidden Classes",
+    "id": "hidden-classes"
+  },
+  {
+    "depth": 3,
+    "value": "Myth 2: \"JavaScript objects are like hash maps\"",
+    "id": "myth-2-javascript-objects-are-like-hash-maps"
+  },
+  {
+    "depth": 3,
+    "value": "Transition Trees",
+    "id": "transition-trees"
+  },
+  {
+    "depth": 3,
+    "value": "The \"Config Object\" disaster we had",
+    "id": "the-config-object-disaster-we-had"
+  },
+  {
+    "depth": 5,
+    "value": "Inline Caching and Monomorphism",
+    "id": "inline-caching-and-monomorphism"
+  },
+  {
+    "depth": 3,
+    "value": "A small example",
+    "id": "a-small-example"
+  },
+  {
+    "depth": 5,
+    "value": "Deoptimization - When V8 Gives Up",
+    "id": "deoptimization-when-v8-gives-up"
+  },
+  {
+    "depth": 3,
+    "value": "Common Deoptimization Triggers",
+    "id": "common-deoptimization-triggers"
+  },
+  {
+    "depth": 3,
+    "value": "Caught Off Guard by BigInt Deoptimization",
+    "id": "caught-off-guard-by-bigint-deoptimization"
+  },
+  {
+    "depth": 4,
+    "value": "The Fix: Enforcing Type Consistency",
+    "id": "the-fix-enforcing-type-consistency"
+  },
+  {
+    "depth": 5,
+    "value": "Trade-offs and Alternative Fixes",
+    "id": "trade-offs-and-alternative-fixes"
+  },
+  {
+    "depth": 5,
+    "value": "The Dispatcher - What we decided to use",
+    "id": "the-dispatcher-what-we-decided-to-use"
+  },
+  {
+    "depth": 6,
+    "value": "Alternative B: The Guarded Branch (Pragmatic Middle Ground)",
+    "id": "alternative-b-the-guarded-branch-pragmatic-middle-ground"
+  },
+  {
+    "depth": 5,
+    "value": "Memory Layout and Object Representation",
+    "id": "memory-layout-and-object-representation"
+  },
+  {
+    "depth": 3,
+    "value": "Small Integers (SMI)",
+    "id": "small-integers-smi"
+  },
+  {
+    "depth": 3,
+    "value": "Heap Objects",
+    "id": "heap-objects"
+  },
+  {
+    "depth": 3,
+    "value": "Object Layout in Memory",
+    "id": "object-layout-in-memory"
+  },
+  {
+    "depth": 3,
+    "value": "String Internalization",
+    "id": "string-internalization"
+  },
+  {
+    "depth": 5,
+    "value": "Common Performance Cliffs",
+    "id": "common-performance-cliffs"
+  },
+  {
+    "depth": 3,
+    "value": "Cliff #1: Unstable Object Shapes (Hidden Class Explosions)",
+    "id": "cliff-1-unstable-object-shapes-hidden-class-explosions"
+  },
+  {
+    "depth": 3,
+    "value": "Cliff #2: Polymorphic and Megamorphic Functions",
+    "id": "cliff-2-polymorphic-and-megamorphic-functions"
+  },
+  {
+    "depth": 3,
+    "value": "Cliff #3: Using delete on Objects",
+    "id": "cliff-3-using-delete-on-objects"
+  },
+  {
+    "depth": 3,
+    "value": "Cliff #4: Mixing Element Kinds in Arrays",
+    "id": "cliff-4-mixing-element-kinds-in-arrays"
+  },
+  {
+    "depth": 5,
+    "value": "Patterns that work",
+    "id": "patterns-that-work"
+  },
+  {
+    "depth": 3,
+    "value": "The V8-Friendly Code Pattern",
+    "id": "the-v8-friendly-code-pattern"
+  },
+  {
+    "depth": 3,
+    "value": "Optimization Strategy: A Checklist",
+    "id": "optimization-strategy-a-checklist"
+  },
+  {
+    "depth": 5,
+    "value": "V8 Flags and Runtime Options",
+    "id": "v8-flags-and-runtime-options"
+  },
+  {
+    "depth": 3,
+    "value": "Informational Flags",
+    "id": "informational-flags"
+  },
+  {
+    "depth": 3,
+    "value": "Behavioral Flags",
+    "id": "behavioral-flags"
+  },
+  {
+    "depth": 3,
+    "value": "How to Use Flags",
+    "id": "how-to-use-flags"
+  },
+  {
+    "depth": 5,
+    "value": "From Full-Codegen to TurboFan",
+    "id": "from-full-codegen-to-turbofan"
+  },
+  {
+    "depth": 3,
+    "value": "The New Pipeline: Ignition and TurboFan (and later Sparkplug and Maglev)",
+    "id": "the-new-pipeline-ignition-and-turbofan-and-later-sparkplug-and-maglev"
+  },
+  {
+    "depth": 3,
+    "value": "Myth 3: \"Modern V8 optimizes everything\"",
+    "id": "myth-3-modern-v8-optimizes-everything"
+  },
+  {
+    "depth": 5,
+    "value": "Best practices for V8 performance",
+    "id": "best-practices-for-v8-performance"
+  },
+  {
+    "depth": 3,
+    "value": "A checklist you can keep handy",
+    "id": "a-checklist-you-can-keep-handy"
+  },
+  {
+    "depth": 5,
+    "value": "Appendix: V8 profiling commands",
+    "id": "appendix-v8-profiling-commands"
+  },
+  {
+    "depth": 5,
+    "value": "Closing - thinking like V8",
+    "id": "closing-thinking-like-v8"
+  }
+]

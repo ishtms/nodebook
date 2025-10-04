@@ -1,0 +1,72 @@
+[
+  {
+    "depth": 5,
+    "value": "Before Git",
+    "id": "before-git"
+  },
+  {
+    "depth": 5,
+    "value": "The Repository",
+    "id": "the-repository"
+  },
+  {
+    "depth": 5,
+    "value": "The Three States",
+    "id": "the-three-states"
+  },
+  {
+    "depth": 5,
+    "value": "The Basic Workflow - Add and Commit",
+    "id": "the-basic-workflow-add-and-commit"
+  },
+  {
+    "depth": 5,
+    "value": "Your Project's Log",
+    "id": "your-projects-log"
+  },
+  {
+    "depth": 5,
+    "value": "Making it even better (optional)",
+    "id": "making-it-even-better-optional"
+  },
+  {
+    "depth": 5,
+    "value": "The Power of Snapshots",
+    "id": "the-power-of-snapshots"
+  },
+  {
+    "depth": 5,
+    "value": "Branching",
+    "id": "branching"
+  },
+  {
+    "depth": 5,
+    "value": "Merging",
+    "id": "merging"
+  },
+  {
+    "depth": 5,
+    "value": "Merge Conflicts",
+    "id": "merge-conflicts"
+  },
+  {
+    "depth": 5,
+    "value": "Remote Repositories",
+    "id": "remote-repositories"
+  },
+  {
+    "depth": 5,
+    "value": "Fetch, Pull, and Push",
+    "id": "fetch-pull-and-push"
+  },
+  {
+    "depth": 5,
+    "value": "\"Oops, I Didn't Mean to Do That\"",
+    "id": "oops-i-didnt-mean-to-do-that"
+  },
+  {
+    "depth": 5,
+    "value": "The Art of a Good Commit Message",
+    "id": "the-art-of-a-good-commit-message"
+  }
+]

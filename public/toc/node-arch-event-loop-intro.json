@@ -1,0 +1,172 @@
+[
+  {
+    "depth": 5,
+    "value": "The Single-Threaded Model",
+    "id": "the-single-threaded-model"
+  },
+  {
+    "depth": 3,
+    "value": "The Call Stack",
+    "id": "the-call-stack"
+  },
+  {
+    "depth": 3,
+    "value": "What \"Blocking\" Truly Means",
+    "id": "what-blocking-truly-means"
+  },
+  {
+    "depth": 5,
+    "value": "V8, Libuv, and the Node.js Bindings",
+    "id": "v8-libuv-and-the-nodejs-bindings"
+  },
+  {
+    "depth": 3,
+    "value": "V8: The JavaScript Execution Engine",
+    "id": "v8-the-javascript-execution-engine"
+  },
+  {
+    "depth": 3,
+    "value": "Libuv",
+    "id": "libuv"
+  },
+  {
+    "depth": 3,
+    "value": "Node.js C++ Bindings",
+    "id": "nodejs-c-bindings"
+  },
+  {
+    "depth": 5,
+    "value": "The Six Phases in Detail",
+    "id": "the-six-phases-in-detail"
+  },
+  {
+    "depth": 3,
+    "value": "The \"Tick\": An Overview of a Single Iteration",
+    "id": "the-tick-an-overview-of-a-single-iteration"
+  },
+  {
+    "depth": 3,
+    "value": "Phase 1: Timers",
+    "id": "phase-1-timers"
+  },
+  {
+    "depth": 3,
+    "value": "Phase 2 & 3: Pending Callbacks and Internal Operations",
+    "id": "phase-2-3-pending-callbacks-and-internal-operations"
+  },
+  {
+    "depth": 3,
+    "value": "Phase 4: The Poll Phase",
+    "id": "phase-4-the-poll-phase"
+  },
+  {
+    "depth": 3,
+    "value": "Phase 5: The Check Phase",
+    "id": "phase-5-the-check-phase"
+  },
+  {
+    "depth": 4,
+    "value": "A use case: A Food Delivery App's Order Confirmation",
+    "id": "a-use-case-a-food-delivery-apps-order-confirmation"
+  },
+  {
+    "depth": 4,
+    "value": "How setImmediate() Solves This",
+    "id": "how-setimmediate-solves-this"
+  },
+  {
+    "depth": 3,
+    "value": "Phase 6: Close Callbacks",
+    "id": "phase-6-close-callbacks"
+  },
+  {
+    "depth": 5,
+    "value": "The Express Lane: Microtasks vs. Macrotasks",
+    "id": "the-express-lane-microtasks-vs-macrotasks"
+  },
+  {
+    "depth": 3,
+    "value": "What even are these?",
+    "id": "what-even-are-these"
+  },
+  {
+    "depth": 3,
+    "value": "The process.nextTick() Queue: The Highest Priority",
+    "id": "the-processnexttick-queue-the-highest-priority"
+  },
+  {
+    "depth": 4,
+    "value": "So, Why Does This Happen?",
+    "id": "so-why-does-this-happen"
+  },
+  {
+    "depth": 3,
+    "value": "The Promise Jobs Queue",
+    "id": "the-promise-jobs-queue"
+  },
+  {
+    "depth": 3,
+    "value": "A Complex Execution Order Analysis",
+    "id": "a-complex-execution-order-analysis"
+  },
+  {
+    "depth": 5,
+    "value": "3Ps: Performance, Patterns, and Pitfalls",
+    "id": "3ps-performance-patterns-and-pitfalls"
+  },
+  {
+    "depth": 3,
+    "value": "Obvious and Subtle Blockers",
+    "id": "obvious-and-subtle-blockers"
+  },
+  {
+    "depth": 3,
+    "value": "The Libuv Thread Pool Revisited",
+    "id": "the-libuv-thread-pool-revisited"
+  },
+  {
+    "depth": 3,
+    "value": "Profiling and Debugging the Event Loop",
+    "id": "profiling-and-debugging-the-event-loop"
+  },
+  {
+    "depth": 5,
+    "value": "Strategies for CPU-Bound and Parallel Work",
+    "id": "strategies-for-cpu-bound-and-parallel-work"
+  },
+  {
+    "depth": 3,
+    "value": "Offloading to the Loop",
+    "id": "offloading-to-the-loop"
+  },
+  {
+    "depth": 3,
+    "value": "True Parallelism: worker_threads",
+    "id": "true-parallelism-workerthreads"
+  },
+  {
+    "depth": 3,
+    "value": "The cluster Module",
+    "id": "the-cluster-module"
+  },
+  {
+    "depth": 5,
+    "value": "Stuff that people often get wrong",
+    "id": "stuff-that-people-often-get-wrong"
+  },
+  {
+    "depth": 3,
+    "value": "7.1 setTimeout(..., 0) vs. setImmediate()",
+    "id": "71-settimeout-0-vs-setimmediate"
+  },
+  {
+    "depth": 3,
+    "value": "Garbage Collection and its Impact on the Loop",
+    "id": "garbage-collection-and-its-impact-on-the-loop"
+  },
+  {
+    "depth": 5,
+    "value": "Final words",
+    "id": "final-words"
+  }
+]

@@ -1,0 +1,72 @@
+[
+  {
+    "depth": 5,
+    "value": "The World Outside the String",
+    "id": "the-world-outside-the-string"
+  },
+  {
+    "depth": 5,
+    "value": "Bits and Bytes",
+    "id": "bits-and-bytes"
+  },
+  {
+    "depth": 3,
+    "value": "A Byte as a Number",
+    "id": "a-byte-as-a-number"
+  },
+  {
+    "depth": 3,
+    "value": "A Byte as a Character",
+    "id": "a-byte-as-a-character"
+  },
+  {
+    "depth": 3,
+    "value": "The \"A-C-F\" Trick for Memorizing Hex Characters",
+    "id": "the-a-c-f-trick-for-memorizing-hex-characters"
+  },
+  {
+    "depth": 3,
+    "value": "How to Understand a Hexadecimal Byte",
+    "id": "how-to-understand-a-hexadecimal-byte"
+  },
+  {
+    "depth": 4,
+    "value": "The Two Place Values",
+    "id": "the-two-place-values"
+  },
+  {
+    "depth": 4,
+    "value": "Another Example, convert C5",
+    "id": "another-example-convert-c5"
+  },
+  {
+    "depth": 3,
+    "value": "Tying It All Back",
+    "id": "tying-it-all-back"
+  },
+  {
+    "depth": 5,
+    "value": "A real demo of why text fails",
+    "id": "a-real-demo-of-why-text-fails"
+  },
+  {
+    "depth": 5,
+    "value": "Why Node Needed Its Own Memory",
+    "id": "why-node-needed-its-own-memory"
+  },
+  {
+    "depth": 5,
+    "value": "The Buffer- Node's Solution",
+    "id": "the-buffer-nodes-solution"
+  },
+  {
+    "depth": 5,
+    "value": "Buffers and TypedArrays Converge",
+    "id": "buffers-and-typedarrays-converge"
+  },
+  {
+    "depth": 5,
+    "value": "The conclusion",
+    "id": "the-conclusion"
+  }
+]

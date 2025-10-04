@@ -1,0 +1,57 @@
+[
+  {
+    "depth": 5,
+    "value": "TL;DR",
+    "id": "tldr"
+  },
+  {
+    "depth": 5,
+    "value": "The Runtime - A Guided Tour Under the Hood",
+    "id": "the-runtime-a-guided-tour-under-the-hood"
+  },
+  {
+    "depth": 3,
+    "value": "Why Blocking I/O Was a Party Everyone Hated",
+    "id": "why-blocking-io-was-a-party-everyone-hated"
+  },
+  {
+    "depth": 3,
+    "value": "The Core Components - V8, libuv, and the Glue",
+    "id": "the-core-components-v8-libuv-and-the-glue"
+  },
+  {
+    "depth": 3,
+    "value": "Let's See It in Action - A Tiny Measurement Experiment",
+    "id": "lets-see-it-in-action-a-tiny-measurement-experiment"
+  },
+  {
+    "depth": 5,
+    "value": "The Ecosystem",
+    "id": "the-ecosystem"
+  },
+  {
+    "depth": 3,
+    "value": "npm - The World's Biggest (and Sometimes Loudest) Toybox",
+    "id": "npm-the-worlds-biggest-and-sometimes-loudest-toybox"
+  },
+  {
+    "depth": 3,
+    "value": "The Day left-pad Broke the Internet",
+    "id": "the-day-left-pad-broke-the-internet"
+  },
+  {
+    "depth": 3,
+    "value": "Node Is Everywhere - It's Not Just for Servers Anymore",
+    "id": "node-is-everywhere-its-not-just-for-servers-anymore"
+  },
+  {
+    "depth": 5,
+    "value": "Practical Checklist & Takeaways",
+    "id": "practical-checklist-takeaways"
+  },
+  {
+    "depth": 5,
+    "value": "Closing Thoughts",
+    "id": "closing-thoughts"
+  }
+]
