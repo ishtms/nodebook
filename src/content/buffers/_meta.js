@@ -11,5 +11,6 @@ export default {
   },
   "fragmentation-and-challenges": {
     title: "Memory Fragmentation and Exercises",
+    display: "hidden",
   },
 };

@@ -1,9 +1,5 @@
 # Working with Buffers
 
-> [!WARNING]
->
-> You've received an early-access to this chapter. Your feedback is invaluable, so please share your thoughts in the comment section at the bottom or in [GitHub discussions](https://github.com/ishtms/nodebook).
-
 > [!NOTE]
 >
 > This chapter takes a deep dive into Buffers. If any part feels unclear or overwhelming, don’t worry, re-read the section, or revisit it later after going through other (sub) chapters.

@@ -155,6 +155,10 @@ Phew. That round trip - from JavaScript to C++ to Libuv to the OS and all the wa
 
 ## The Six Phases in Detail
 
+> [!TIP]
+>
+> There's an awesome tool created by [@vagostep](https://github.com/vagostep) that allows you to visualize how the Event Loop works. You might want to play around with it. Here's the link - [NodeLoops](https://nodeloops.com/)
+
 The event loop isn't just one big queue. That's a common misconception. It's a highly structured, multi-phase cycle. Each full lap through this cycle is called a "tick." Getting your head around these phases is the absolute key to understanding why async operations execute in the order they do. Libuv's loop is just a repeating journey through these six core phases.
 
 ### The "Tick": An Overview of a Single Iteration

@@ -58,7 +58,7 @@ export const metadata = {
 
   metadataBase: new URL("https://www.thenodebook.com"),
   applicationName: "NodeBook",
-  authors: [{ name: "Ishtmeet Singh", url: "https://github.com/ishtms" }],
+  authors: [{ name: "Ishtmeet Singh", url: "https://ishtms.com" }],
   creator: "Ishtmeet Singh",
   publisher: "NodeBook",
   generator: "Next.js",
@@ -190,12 +190,17 @@ export default async function DocsLayout({ children, ...params }) {
           banner={true}
           darkMode={true}
           editLink={true}
+          toc={{
+            float: true,
+          }}
           navbar={
-            <Navbar
-              logoLink="/"
-              logo={<Image className="rounded-full" src="/logo.jpg" alt="Logo" width={32} height={32} />}
-              projectLink="https://github.com/ishtms/nodebook"
-            />
+            <>
+              <Navbar
+                logoLink="/"
+                logo={<Image className="rounded-full" src="/logo.jpg" alt="Logo" width={32} height={32} />}
+                projectLink="https://github.com/ishtms/nodebook"
+              ></Navbar>
+            </>
           }
         >
           {children}

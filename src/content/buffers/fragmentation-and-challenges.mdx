@@ -2,9 +2,13 @@ import MemoryFragmentationViz from "../../components/chapters/MemoryFragmentatio
 
 # Fragmentation & Buffer code challenges
 
+> [!WARNING]
+>
+> You've received an early-access to this chapter. Your feedback is invaluable, so please share your thoughts in the comment section at the bottom or in [GitHub discussions](https://github.com/ishtms/nodebook).
+
 Alright, we've covered a lot of ground. You now have a solid mental model of what a `Buffer` is, where it lives in memory, and the critical distinction between a view and a copy. You've seen the raw power of zero-copy operations and the leaks they can cause if you're not careful. We've talked about the internal buffer pool and how Node.js cleverly optimizes small, frequent allocations to avoid the performance penalty of constant system calls.
 
-This chapter is where it all comes together. We're going to dive deep into a classic, low-level problem that most JavaScript developers never have to think about: **memory fragmentation**. It's an issue that feels abstract until it crashes your production server with a cryptic out-of-memory error, even when your monitoring dashboards swear you have plenty of RAM available. We'll dissect what it is, why it happens, and how Node's memory architecture both helps and sometimes hinders the situation.
+This chapter is where it all comes together. We're going to dive deep into a classic, low-level problem that most JavaScript developers never have to think about: **memory fragmentation**. It's an issue that feels abstract until it crashes your production server, even when your monitoring dashboards swear you have plenty of RAM available. We'll dissect what it is, why it happens, and how Node's memory architecture both helps and sometimes hinders the situation.
 
 Then, we're shifting gears. The second, larger part of this chapter is dedicated to a bunch of comprehensive code challenges. This chapter is about taking everything we've discussed - from byte-level interpretation and endianness to the view-vs-copy trade-off and buffer pooling - and applying it to solve real-world problems. You'll build a binary protocol parser, profile memory usage to see the leaks for yourself, implement a stateful stream processor, and even construct your own application-level buffer pool.
 
@@ -175,7 +179,7 @@ I am not providing the solutions. The goal is for you to build them. Struggle wi
 
 Let's begin.
 
-### Challenge \#1: The Fixed-Size Binary Protocol Parser
+### Challenge \#1
 
 Imagine you're working on an IoT project. A fleet of sensors sends data packets over TCP to your Node.js server. The protocol is simple and fixed-size. Every packet is exactly 24 bytes long and has the following structure:
 
@@ -251,7 +255,7 @@ Your `parseSensorData(samplePacket)` function should return an object that looks
 - The offset for each read is critical. This is a fixed-size protocol, so the offsets are constant.
 - Good practice dictates you should validate the input buffer's length before attempting to parse it.
 
-### Challenge #2: The View vs. Copy Memory Profiler
+### Challenge #2
 
 We've talked at length about the memory retention issue where a small `Buffer` view can hold a massive parent buffer hostage. It's time to prove it to yourself with code.
 
@@ -283,7 +287,7 @@ Your script's output should show a dramatic difference in the `external` memory 
 - The total size of the copies is `100,000 * 16 bytes = 1.6MB`. Your result for the copy test should be in this ballpark.
 - A helper function to format the byte counts into KB/MB will make your output much easier to read.
 
-### Challenge \#3: The Stateful Streaming Parser (TLV Protocol)
+### Challenge \#3
 
 Your fixed-protocol from Challenge #1 was a success, but now you need to handle a more complex, variable-length protocol. This is common in network applications. You'll be parsing a stream of messages formatted using a Type-Length-Value (TLV) encoding.
 
@@ -344,7 +348,7 @@ When you pipe these chunks through an instance of your `TlvParser`, it should em
 - Once a message is successfully parsed, how do you remove it from your internal buffer so you can parse the next one? `buf.subarray()` is the tool for this.
 - Why is it important for the parser to emit a _copy_ of the value buffer, not a view into its internal buffer? Think about what happens to the internal buffer over time.
 
-### Challenge #4: Implementing a Robust Buffer Pool
+### Challenge #4
 
 Your video processing service is suffering from memory fragmentation. It constantly allocates and frees large (64KB) buffers, and after running for a few days, it crashes with out-of-memory errors. You've decided to implement a custom, application-level buffer pool to mitigate this churn.
 
@@ -388,7 +392,7 @@ Write the `BufferPool` class and then write a small simulation to test it. The s
 - In a real-world multi-threaded application (using worker threads), how would you need to change this class to make it thread-safe? (This is a thought experiment; you don't need to implement it for this challenge).
 - The `try...finally` block is your best friend when using this pool to ensure buffers are always released, even if errors occur.
 
-### Challenge \#5: The Mixed-Endianness `DataView` Parser
+### Challenge \#5
 
 You are interfacing with a legacy piece of hardware that uses a bizarre binary format. It mixes Big-Endian and Little-Endian byte orders within the same data packet. The `Buffer`'s standard `read*BE()` and `read*LE()` methods are great, but for maximum clarity and safety, you've decided to use a `DataView`.
 
@@ -454,7 +458,7 @@ Your `parseLegacyPacket(legacyPacket)` function should return an object that loo
 - The third argument to `DataView` methods is the endianness flag. `false` (or omitted) is Big-Endian. `true` is Little-Endian. You will need to use both.
 - This is a great exercise in careful, methodical parsing where every single byte and its interpretation matters.
 
-### Challenge #6 (Advanced): Thread-Safe Counter with `SharedArrayBuffer`
+### Challenge #6 (Advanced)
 
 > [!IMPORTANT]
 >
