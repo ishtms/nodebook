@@ -1,41 +1,41 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "TL;DR - for the impatient",
     "id": "tldr-for-the-impatient"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "You leaked passwords in un-initialized memory",
     "id": "you-leaked-passwords-in-un-initialized-memory"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Understanding Buffer Memory Architecture",
     "id": "understanding-buffer-memory-architecture"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Buffer.alloc()",
     "id": "bufferalloc"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Buffer.allocUnsafe()",
     "id": "bufferallocunsafe"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Buffer.from()",
     "id": "bufferfrom"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Buffer Pooling and the 8KB Secret",
     "id": "buffer-pooling-and-the-8kb-secret"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Let's measure the performance",
     "id": "lets-measure-the-performance"
   },
@@ -60,7 +60,7 @@
     "id": "bufferfrom-performance"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Security Implications and Attack Vectors",
     "id": "security-implications-and-attack-vectors"
   },
@@ -85,7 +85,7 @@
     "id": "timing-attacks"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Memory Fragmentation and GC Pressure",
     "id": "memory-fragmentation-and-gc-pressure"
   },
@@ -100,27 +100,27 @@
     "id": "memory-fragmentation"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Platform Differences and Allocator Behavior",
     "id": "platform-differences-and-allocator-behavior"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Production Decision Framework",
     "id": "production-decision-framework"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Migration Patterns and Safer Defaults",
     "id": "migration-patterns-and-safer-defaults"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Re-cap on the best practices",
     "id": "re-cap-on-the-best-practices"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Closing",
     "id": "closing"
   }

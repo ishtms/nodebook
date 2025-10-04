@@ -1,6 +1,6 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Memory Fragmentation",
     "id": "memory-fragmentation"
   },
@@ -25,7 +25,7 @@
     "id": "buffer-reuse"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Code Challenges",
     "id": "code-challenges"
   },

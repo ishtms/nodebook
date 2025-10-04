@@ -52,10 +52,8 @@ function extractTocFromMarkdown(content) {
         .replace(/-+/g, "-")
         .replace(/^-|-$/g, "");
 
-      const convertedDepth = depth === 2 ? 5 : depth;
-
       headings.push({
-        depth: convertedDepth,
+        depth,
         value,
         id,
       });

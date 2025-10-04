@@ -1,6 +1,6 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Four Kind of Streams",
     "id": "the-four-kind-of-streams"
   },
@@ -30,12 +30,12 @@
     "id": "transform-streams"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "pipe()",
     "id": "pipe"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Building Your Own Streams",
     "id": "building-your-own-streams"
   },
@@ -50,12 +50,12 @@
     "id": "implementing-a-custom-transform-stream"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Object Mode Streams",
     "id": "object-mode-streams"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Modern Stream APIs",
     "id": "modern-stream-apis"
   },
@@ -75,12 +75,12 @@
     "id": "the-finished-utility"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Web Streams and Interoperability",
     "id": "web-streams-and-interoperability"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Summary",
     "id": "summary"
   }

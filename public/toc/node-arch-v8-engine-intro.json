@@ -1,16 +1,16 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "TL;DR",
     "id": "tldr"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The 100x Slowdown Mystery",
     "id": "the-100x-slowdown-mystery"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "How V8 Actually Executes JavaScript",
     "id": "how-v8-actually-executes-javascript"
   },
@@ -20,7 +20,7 @@
     "id": "myth-1-v8-is-just-an-interpreter"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Compilation Pipeline: Ignition to TurboFan",
     "id": "the-compilation-pipeline-ignition-to-turbofan"
   },
@@ -50,7 +50,7 @@
     "id": "turbofans-speculative-optimization"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Hidden Classes",
     "id": "hidden-classes"
   },
@@ -70,7 +70,7 @@
     "id": "the-config-object-disaster-we-had"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Inline Caching and Monomorphism",
     "id": "inline-caching-and-monomorphism"
   },
@@ -80,7 +80,7 @@
     "id": "a-small-example"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Deoptimization - When V8 Gives Up",
     "id": "deoptimization-when-v8-gives-up"
   },
@@ -115,7 +115,7 @@
     "id": "alternative-b-the-guarded-branch-pragmatic-middle-ground"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Memory Layout and Object Representation",
     "id": "memory-layout-and-object-representation"
   },
@@ -140,7 +140,7 @@
     "id": "string-internalization"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Common Performance Cliffs",
     "id": "common-performance-cliffs"
   },
@@ -165,7 +165,7 @@
     "id": "cliff-4-mixing-element-kinds-in-arrays"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Patterns that work",
     "id": "patterns-that-work"
   },
@@ -180,7 +180,7 @@
     "id": "optimization-strategy-a-checklist"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "V8 Flags and Runtime Options",
     "id": "v8-flags-and-runtime-options"
   },
@@ -200,7 +200,7 @@
     "id": "how-to-use-flags"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "From Full-Codegen to TurboFan",
     "id": "from-full-codegen-to-turbofan"
   },
@@ -215,7 +215,7 @@
     "id": "myth-3-modern-v8-optimizes-everything"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Best practices for V8 performance",
     "id": "best-practices-for-v8-performance"
   },
@@ -225,12 +225,12 @@
     "id": "a-checklist-you-can-keep-handy"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Appendix: V8 profiling commands",
     "id": "appendix-v8-profiling-commands"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Closing - thinking like V8",
     "id": "closing-thinking-like-v8"
   }

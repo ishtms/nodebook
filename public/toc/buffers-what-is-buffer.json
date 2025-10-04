@@ -1,11 +1,11 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The World Outside the String",
     "id": "the-world-outside-the-string"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Bits and Bytes",
     "id": "bits-and-bytes"
   },
@@ -45,27 +45,27 @@
     "id": "tying-it-all-back"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "A real demo of why text fails",
     "id": "a-real-demo-of-why-text-fails"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Why Node Needed Its Own Memory",
     "id": "why-node-needed-its-own-memory"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Buffer- Node's Solution",
     "id": "the-buffer-nodes-solution"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Buffers and TypedArrays Converge",
     "id": "buffers-and-typedarrays-converge"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The conclusion",
     "id": "the-conclusion"
   }

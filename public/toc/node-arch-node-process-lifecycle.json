@@ -1,11 +1,11 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Node.js Process Birth",
     "id": "the-nodejs-process-birth"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "V8 and Native Module Initialization",
     "id": "v8-and-native-module-initialization"
   },
@@ -20,12 +20,12 @@
     "id": "wiring-the-native-modules"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Module Loading and Resolution",
     "id": "module-loading-and-resolution"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "ES Modules (import)",
     "id": "es-modules-import"
   },
@@ -45,7 +45,7 @@
     "id": "so-whats-the-real-world-impact"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Process Bootstrapping Patterns",
     "id": "process-bootstrapping-patterns"
   },
@@ -55,7 +55,7 @@
     "id": "a-better-way-the-async-initializer"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Signal Handling and Process Communication",
     "id": "signal-handling-and-process-communication"
   },
@@ -65,12 +65,12 @@
     "id": "signal-handling-issues"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Graceful Shutdown",
     "id": "graceful-shutdown"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Handle and Resource Management",
     "id": "handle-and-resource-management"
   },
@@ -85,12 +85,12 @@
     "id": "debugging-handle-leaks"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Memory Lifecycle and Heap",
     "id": "memory-lifecycle-and-heap"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Exit Codes and Process States",
     "id": "exit-codes-and-process-states"
   },
@@ -100,7 +100,7 @@
     "id": "why-do-exit-codes-matter-so-much-in-production"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Child Processes and Cluster Lifecycle",
     "id": "child-processes-and-cluster-lifecycle"
   },
@@ -115,7 +115,7 @@
     "id": "childprocess-and-the-orphan-problem"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Debugging Process Issues",
     "id": "debugging-process-issues"
   },
@@ -135,7 +135,7 @@
     "id": "production-safety-checklist"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Closing - Respecting the Process Lifecycle",
     "id": "closing-respecting-the-process-lifecycle"
   }

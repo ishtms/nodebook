@@ -1,6 +1,6 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "A Gigabyte-Scale Memory Leak",
     "id": "a-gigabyte-scale-memory-leak"
   },
@@ -15,12 +15,12 @@
     "id": "the-8kb-speed-hack-buffer-pooling"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Views and References: slice, subarray, and Buffer.from",
     "id": "views-and-references-slice-subarray-and-bufferfrom"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Zero-Copy Operations",
     "id": "zero-copy-operations"
   },
@@ -30,57 +30,57 @@
     "id": "buffers-typedarrays-and-the-memory-they-share"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "When Views Share Memory (and When They Don't)",
     "id": "when-views-share-memory-and-when-they-dont"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Copy Semantics and Buffer.copy()",
     "id": "copy-semantics-and-buffercopy"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "SharedArrayBuffer and Cross-Thread Views",
     "id": "sharedarraybuffer-and-cross-thread-views"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Memory Retention and Garbage Collection",
     "id": "memory-retention-and-garbage-collection"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Binary Protocol Parsing with Views",
     "id": "binary-protocol-parsing-with-views"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Platform Endianness and TypedArray Views",
     "id": "platform-endianness-and-typedarray-views"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Production Patterns for Zero-Copy",
     "id": "production-patterns-for-zero-copy"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Debugging Memory Issues with Views",
     "id": "debugging-memory-issues-with-views"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Best Practices for Buffer Manipulation",
     "id": "best-practices-for-buffer-manipulation"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Memory Profiling Data",
     "id": "memory-profiling-data"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Closing",
     "id": "closing"
   }

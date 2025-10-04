@@ -1,3 +1,3 @@
 export default {
-  "intro-to-streams": "Introduction to Streams",
+  "foundation-of-streams": "Foundation of Streams",
 };

@@ -1,6 +1,6 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Single-Threaded Model",
     "id": "the-single-threaded-model"
   },
@@ -15,7 +15,7 @@
     "id": "what-blocking-truly-means"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "V8, Libuv, and the Node.js Bindings",
     "id": "v8-libuv-and-the-nodejs-bindings"
   },
@@ -35,7 +35,7 @@
     "id": "nodejs-c-bindings"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Six Phases in Detail",
     "id": "the-six-phases-in-detail"
   },
@@ -80,7 +80,7 @@
     "id": "phase-6-close-callbacks"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Express Lane: Microtasks vs. Macrotasks",
     "id": "the-express-lane-microtasks-vs-macrotasks"
   },
@@ -110,7 +110,7 @@
     "id": "a-complex-execution-order-analysis"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "3Ps: Performance, Patterns, and Pitfalls",
     "id": "3ps-performance-patterns-and-pitfalls"
   },
@@ -130,7 +130,7 @@
     "id": "profiling-and-debugging-the-event-loop"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Strategies for CPU-Bound and Parallel Work",
     "id": "strategies-for-cpu-bound-and-parallel-work"
   },
@@ -150,7 +150,7 @@
     "id": "the-cluster-module"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Stuff that people often get wrong",
     "id": "stuff-that-people-often-get-wrong"
   },
@@ -165,7 +165,7 @@
     "id": "garbage-collection-and-its-impact-on-the-loop"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Final words",
     "id": "final-words"
   }

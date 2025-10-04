@@ -1,11 +1,11 @@
 [
   {
-    "depth": 5,
+    "depth": 2,
     "value": "TL;DR",
     "id": "tldr"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Runtime - A Guided Tour Under the Hood",
     "id": "the-runtime-a-guided-tour-under-the-hood"
   },
@@ -25,7 +25,7 @@
     "id": "lets-see-it-in-action-a-tiny-measurement-experiment"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "The Ecosystem",
     "id": "the-ecosystem"
   },
@@ -45,12 +45,12 @@
     "id": "node-is-everywhere-its-not-just-for-servers-anymore"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Practical Checklist & Takeaways",
     "id": "practical-checklist-takeaways"
   },
   {
-    "depth": 5,
+    "depth": 2,
     "value": "Closing Thoughts",
     "id": "closing-thoughts"
   }

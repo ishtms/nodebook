@@ -10,6 +10,7 @@ compiler/
 # dependencies
 /node_modules
 /.pnp
+test.js
 .pnp.*
 .yarn/*
 .ws-state.json
