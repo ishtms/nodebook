@@ -24,7 +24,7 @@ The journey begins not in JavaScript, but inside the Node.js source code, in a C
 
 Here's the simplified sequence of what goes down in C++ land -
 
-1. The processThe `main` function starts. It parses your command-line arguments (`--inspect`, `--max-old-space-size`, all that stuff) and sets up the basic process properties.
+1. The `main` function starts. It parses your command-line arguments (`--inspect`, `--max-old-space-size`, all that stuff) and sets up the basic process properties.
 2. We've already talked about this but, node is built on Google's V8 engine, and the first thing it has to do is **wake it up**. This sets up shared resources like thread pools for background tasks (hello, garbage collection). This only happens once.
 3. Then it creates a **V8 Isolate**. An **isolate** is a single, sandboxed instance of the V8 engine. It has its own memory heap and its own garbage collector. Think of it as a little planet for your JavaScript to live in. Creating this is a heavyweight operation; it's where a big chunk of memory gets allocated for the heap right off the bat.
 4. After creating the V8 Isolate, it has to **create a V8 Context** inside that isolate. This is the execution environment with all the built-in stuff your code expects, like `Object`, `Array`, and `JSON`. The `global` object lives here.
@@ -163,7 +163,7 @@ The module system is one of the topics, which isn’t usually given much attenti
 
 That is a dangerous assumption.
 
-The module system, with its resolution algorithm and its cache, has a massive impact on startup performance and memory. I still remember when it was a pain in the butt for me, when I was building a backend service for a game built in Unreal engine.
+The module system, with its resolution algorithm and its cache, has a massive impact on startup performance and memory. I still remember when it was a pain in the butt for me, when I was building a backend service for a game built in Unreal Engine.
 
 We had a service that, in production, would sometimes take almost a minute to start. It would just sit there, churning CPU, long before it ever started listening on its port. On our dev laptops? 3 seconds. Staging? 5 seconds. Production? A total disaster. The deployment orchestrator would just give up and kill the pod, triggering a crash-loop that would go on for ages.
 
@@ -198,7 +198,7 @@ The fix was two-fold. First, we started using a bundler like Webpack for product
 
 > [!WARNING]
 >
-> Don't Bundle Your Entire Node.js Server It can cause a lot of issues. Bundling everything can break dynamic imports and native modules. For targeted fixes, use a tool like `esbuild` to bundle only the necessary parts.
+> Don't bundle your entire Node.js server. It can cause a lot of issues. Bundling everything can break dynamic imports and native modules. For targeted fixes, use a tool like `esbuild` to bundle only the necessary parts.
 
 This experience also introduced us to another issue - **The Module Cache Memory Bomb**. We had this long-running process that just kept growing in memory until it got OOM-killed (Out Of Memory). We couldn't find a leak anywhere in our own code. We took a heap snapshot and found the problem: `require.cache`. The service was dynamically generating reports, and some clever developer had written this:
 
@@ -537,7 +537,7 @@ The core idea is a state transition - `Accepting Traffic -> Draining -> Closed`.
 
 1.  The very first thing you should do is to **stop accepting new work**. You lock the front door. For a web server, this is `server.close()`. This tells the server to stop accepting new connections. It does _not_ terminate existing connections; those are allowed to finish what they're doing.
 
-2.  Then you **finish in-flight work (draining)**. This is the most critical step and the one everyone gets wrong. Your app has to wait for everything it's currently doing to complete. That could be an HTTP request, a database transaction, a message from a queue, anything. Tracking this "in-flight" work is the hard part. For web servers, the callback in `server.close()` helps, but it only tells you when the TCP connection is closed, not that your application logic for that request is done. You often need to implementation for this, and it can get quite hard TBF.
+2.  Then you **finish in-flight work (draining)**. This is the most critical step and the one everyone gets wrong. Your app has to wait for everything it's currently doing to complete. That could be an HTTP request, a database transaction, a message from a queue, anything. Tracking this "in-flight" work is the hard part. For web servers, the callback in `server.close()` helps, but it only tells you when the TCP connection is closed, not that your application logic for that request is done. You often need an implementation for this, and it can get quite hard TBF.
 
 3.  The second last step is to **clean up resources**. Once you're positive no more work is being done, you can start tearing things down. Close your database connection pools. Disconnect from Redis/Valkey or RabbitMQ. Flush your logs. The order here is critical - you can't close the database connection while a request is still trying to use it. This is why cleanup comes _after_ draining.
 
@@ -683,7 +683,7 @@ timer.unref();
 
 This `ref()`/`unref()` mechanism is key. In our `EMFILE` problem, we were leaking referenced socket handles. They were keeping the process alive, which led to the `SIGKILL`, which led to the resource leak.
 
-Here is a small snippet that will hang on shutdown if a client connection remains active. You can copy paste this in a file, and run it with `node server.js`
+Here is a small snippet that will hang on shutdown if a client connection remains active. You can copy paste this in a file, and run it with `node server.js`.
 
 ### Let's create leaked handles
 
@@ -913,7 +913,8 @@ You can create your own application-specific exit codes to make debugging a thou
 - `70`: Database connection failed on startup.
 - `71`: Invalid configuration file.
 - `72`: Couldn't bind to the required port.
-  Now, when your service fails to start, an alert on exit code `70` immediately tells the person who's looking at it that "it's a database problem." They don't have to waste time digging through logs to figure that out.
+
+Now, when your service fails to start, an alert on exit code `70` immediately tells the person who's looking at it that "it's a database problem." They don't have to waste time digging through logs to figure that out.
 
 > [!NOTE]
 >
