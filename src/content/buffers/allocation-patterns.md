@@ -330,7 +330,7 @@ The takeaway is simple. The Buffer pool makes small, unsafe allocations even mor
 
 ## Let's measure the performance
 
-Let's put some hard numbers behind these claims. The performance difference between `alloc` and `allocUnsafe` isn't sutle, it's a cliff.
+Let's put some hard numbers behind these claims. The performance difference between `alloc` and `allocUnsafe` isn't subtle, it's a cliff.
 
 We'll run a simple benchmark. Allocate a buffer of a specific size 10,000 times and measure how long it takes. The code for these benchmarks can be found in `examples/buffer-allocation-patterns/benchmark.js`.
 
