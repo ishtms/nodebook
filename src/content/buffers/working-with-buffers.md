@@ -486,7 +486,7 @@ The view object maintains an internal reference to its parent buffer. According 
 
 This is why the heap snapshot was so confusing. The profiler correctly identified that the `userIdSlice` objects were small. But it also has a concept of "retained size" vs. "shallow size."
 
-- **Shallow Size** is thhe size of the object itself. For our slices, this was tiny, just a few dozen bytes for the JavaScript object wrapper.
+- **Shallow Size** is the size of the object itself. For our slices, this was tiny, just a few dozen bytes for the JavaScript object wrapper.
 - **Retained Size** is the size of all memory that is being kept alive _solely_ because this object exists. For our slices, the retained size was enormous, because they were the only thing keeping the 50MB parent buffers from being garbage collected.
 
 The heap snapshot showed 890MB retained by 10KB of slices. It looked like an accounting error, but it was the brutal truth of view semantics. Once we understood this, the fix was obvious: we had to sever the link between the small piece of data we needed and its giant parent. The only way to do that is with a copy.
