@@ -1,0 +1,1192 @@
+---
+title: "Writable Streams"
+date: "2025-10-28"
+excerpt: "Understanding writable streams, implementing custom writable streams, and handling backpressure effectively."
+category: "Streams"
+tags: ["streams", "writable", "backpressure", "custom-streams"]
+author: "Ishtmeet Singh @ishtms"
+chapter: "streams"
+subchapter: "writable-streams"
+published: true
+toc: true
+---
+
+
+You've seen how Readable streams work. You understand how they maintain internal buffers, how they transition between modes, and how they deliver data to consumers. Now we need to flip the perspective and look at the other side of the streaming equation: **where does data go once it's been produced?**
+
+This is the domain of **Writable streams**. If Readable streams are about getting data out of a source, Writable streams are about getting data *into* a destination. Files on disk, network sockets, HTTP responses, compression algorithms, database connections - anywhere you're sending data chunk by chunk, you're working with some form of Writable stream.
+
+Writing to a Writable stream isn't simple. It's not just "call `write()` with your data and move on." There's a critical feedback mechanism built into the API, and if you ignore it, you'll eventually see your process consume more memory than you expect. That feedback mechanism is **backpressure**, and understanding it is essential for production Node.js code that handles data streams.
+
+We're going to examine Writable streams from the ground up. First, we'll look at the `Writable` class itself - what options it takes, what events it emits, and what the `write()` method's return value actually means. Then we'll dive deep into **backpressure**, exploring why it exists, how the internal buffering creates it, and what happens when you ignore it. After that, we'll implement custom Writable streams so you understand exactly what happens when data flows into a destination. Finally, we'll look at the correct patterns for writing to Writable streams in real applications.
+
+## The Writable Stream Class
+
+When you create or receive a Writable stream, you're working with an object that extends `EventEmitter`, just like Readable. This should feel familiar by now. Streams in Node.js communicate through events because asynchronous I/O operations don't return values immediately - they signal completion or failure through events.
+
+The Writable stream's job is straightforward in concept: accept chunks of data through its `write()` method, and send those chunks to some underlying destination. The destination could be anything. A file descriptor managed by the operating system. A TCP socket. An in-memory array. The Writable stream doesn't care. It provides the interface and the buffering logic. The underlying destination is abstracted away into an internal method called `_write()`, which subclasses implement.
+
+The configuration options control how the Writable stream behaves under load.
+
+The `highWaterMark` option works similarly to Readable streams, but its meaning is slightly different. For a Writable stream, `highWaterMark` represents the **maximum number of bytes** (or objects in `objectMode`) that the stream will buffer internally before it starts signaling backpressure. The default is `16384` bytes, the same 16KB default that Readable streams use.
+
+When you call `write()` on a Writable stream, that data doesn't necessarily get written to the underlying destination immediately. Instead, it gets added to an internal buffer. If the destination is fast (like writing to `/dev/null` or to a socket with plenty of bandwidth), the buffer stays mostly empty, and writes complete quickly. But if the destination is slow (like writing to a mechanical hard drive during heavy I/O load, or sending data over a congested network), the buffer starts to fill up.
+
+When the buffered data reaches or exceeds `highWaterMark`, the `write()` method **returns `false`**. This is the **backpressure signal**. The stream is saying "I'm buffering too much data. You need to slow down or stop writing until I tell you I'm ready again." If the application ignores this signal and keeps calling `write()`, the internal buffer keeps growing, consuming more and more memory until the process runs out.
+
+A Writable stream configuration looks like this:
+
+```js
+import { Writable } from "stream";
+
+const writable = new Writable({
+  highWaterMark: 8192, // 8KB buffer threshold
+});
+```
+
+This creates a Writable stream that will signal backpressure when its internal buffer reaches 8KB. Note that the stream doesn't stop accepting writes when backpressure is signaled - it just returns `false` to indicate that you should pause.
+
+The `objectMode` option, just like with Readable streams, changes the stream from dealing with bytes to dealing with arbitrary JavaScript objects. In `objectMode`, `highWaterMark` represents the **number of objects** buffered, not the byte count. The default in `objectMode` is 16 objects.
+
+```js
+const objectWritable = new Writable({
+  objectMode: true,
+  highWaterMark: 50, // buffer up to 50 objects
+});
+```
+
+This is useful when you're building data processing pipelines where each chunk represents a logical unit - a database row, a parsed log entry, a JSON document - rather than a chunk of bytes.
+
+The `decodeStrings` option controls whether strings passed to `write()` are converted to `Buffer` objects before being passed to the `_write()` method. By default, this is `true`. If you set it to `false`, strings are passed through as-is. Most of the time you won't need to touch this, but it matters if you're implementing a Writable stream that specifically wants to handle strings differently from buffers.
+
+```js
+const stringWritable = new Writable({
+  decodeStrings: false, // keep strings as strings
+});
+```
+
+There's also a `defaultEncoding` option that specifies the encoding used when strings are converted to buffers (if `decodeStrings` is `true`). The default is `'utf8'`, which is almost always what you want for text data.
+
+Finally, there's an `emitClose` option that controls whether the stream emits a `close` event when it's destroyed. The default is `true`. Unless you have a specific reason to suppress the `close` event, you should leave this alone.
+
+To use Writable streams effectively, you need to understand the events they emit and what they signal.
+
+## Events on Writable Streams
+
+Writable streams emit several events that signal state changes. Each event fires at a specific point in the stream's lifecycle.
+
+The most critical event for managing backpressure is **`drain`**. This event fires when the Writable stream's internal buffer was full (meaning `write()` was returning `false`) and has now drained below the `highWaterMark` threshold. The `drain` event is your signal to resume writing.
+
+The intended usage pattern:
+
+```js
+function writeData(writable, data) {
+  if (!writable.write(data)) {
+    writable.once("drain", () => {
+      // Buffer drained, safe to write more
+      continueWriting();
+    });
+  }
+}
+```
+
+The `write()` call returns `false`, which means the buffer is full. So we attach a one-time `drain` event listener and pause our writing logic. When `drain` fires, the buffer has space again, and we can resume.
+
+If you've never worked with streams before, or haven't read my earlier chapters on streams, this might feel strange. **Blocking would defeat the entire purpose of Node.js's asynchronous I/O model.** If `write()` blocked, your entire event loop would freeze while waiting for the write to complete. By using an event-based signal, the event loop stays free to handle other work while the stream's internal buffer drains.
+
+The **`finish`** event fires when you call `end()` on the stream and all buffered data has been successfully written to the underlying destination. This is the signal that the stream has completed its work. Note that `finish` fires *before* `close`. The stream has finished writing, but it might not have closed its underlying resources yet.
+
+```js
+writable.on("finish", () => {
+  console.log("All data written");
+});
+
+writable.write("some data");
+writable.end(); // signals end of writes
+```
+
+The `end()` method tells the stream "I'm not going to write any more data." After you call `end()`, calling `write()` will throw an error. The stream processes any remaining buffered data, and when everything has been written, it emits `finish`.
+
+The **`close`** event fires when the stream and its underlying resources have been closed. This happens *after* `finish`. Not all streams emit `close`, and whether they do depends on the implementation of the underlying resource. For file streams, `close` fires when the file descriptor is closed. For socket streams, `close` fires when the socket is closed.
+
+```js
+writable.on("close", () => {
+  console.log("Stream closed");
+});
+```
+
+The **`error`** event fires when something goes wrong during writing. Maybe the file system is full. Maybe the network connection dropped. Maybe the underlying destination threw an error for some internal reason. When an error occurs, the stream emits `error` with the error object. Just like with Readable streams, if you don't have an error handler attached, the error will be thrown, potentially crashing your process.
+
+```js
+writable.on("error", (err) => {
+  console.error("Write error:", err);
+});
+```
+
+The **`pipe`** event fires when a Readable stream is piped into this Writable stream using the `pipe()` method. The event passes the source Readable stream as an argument. This is mainly useful for logging or debugging - knowing which Readable streams are currently piped into this Writable.
+
+```js
+writable.on("pipe", (src) => {
+  console.log("Something is piping into me");
+});
+```
+
+Similarly, there's an **`unpipe`** event that fires when a Readable stream is unpiped from this Writable.
+
+These events form the API surface for interacting with Writable streams. But to really understand how to use them correctly, we need to dive into the core concept that governs flow control in streaming systems: **backpressure**.
+
+## Understanding Backpressure
+
+Backpressure is one of those concepts that sounds abstract until you see what happens without it. Consider a concrete scenario.
+
+You're writing a program that reads a large file and writes it to another location. The **naive approach** looks like this:
+
+```js
+import { createReadStream, createWriteStream } from "fs";
+
+const readable = createReadStream("input.dat");
+const writable = createWriteStream("output.dat");
+
+readable.on("data", (chunk) => {
+  writable.write(chunk);
+});
+```
+
+This code reads chunks from `input.dat` and writes them to `output.dat`. Simple, right? But there's a **hidden problem**. What if the Readable stream produces data faster than the Writable stream can consume it?
+
+The file system can read 100MB/sec from the source disk, but it can only write 50MB/sec to the destination disk. The Readable stream is producing 100MB/sec worth of chunks, and you're calling `write()` for every chunk. The Writable stream can only process 50MB/sec, so the other 50MB/sec **accumulates in its internal buffer**. After one second, there's 50MB in the buffer. After two seconds, 100MB. After ten seconds, 500MB. The buffer keeps growing until your process runs out of memory and crashes.
+
+This is the problem backpressure solves. The Writable stream signals to the producer "slow down, I can't keep up" by **returning `false` from `write()`**. The producer is then supposed to pause until the Writable stream emits `drain`, indicating that it's caught up and ready for more data.
+
+The correct version:
+
+```js
+readable.on("data", (chunk) => {
+  const canContinue = writable.write(chunk);
+  if (!canContinue) {
+    readable.pause();
+    writable.once("drain", () => {
+      readable.resume();
+    });
+  }
+});
+```
+
+When `write()` returns `false`, we pause the Readable stream. It stops emitting `data` events. The Writable stream's internal buffer drains as it writes data to the underlying destination. When the buffer drops below `highWaterMark`, `drain` fires, and we resume the Readable stream. **Data flow is regulated by the consumer's capacity, not the producer's speed.**
+
+This pattern is so common that Node.js provides `pipe()` as a built-in method that handles this exact flow control automatically. We'll cover `pipe()` in depth in a later sub-chapter, but this illustrates that backpressure management is a core part of the streaming model, important enough to warrant dedicated helper methods.
+
+What actually happens inside the Writable stream when you call `write()`?
+
+When you call `writable.write(chunk)`, the stream does several things. First, it checks if it's already writing data to the underlying destination. If it is, the chunk gets added to an internal buffer. If it's not currently writing, the chunk is passed immediately to the `_write()` method, which handles the actual I/O.
+
+The internal buffer is a **linked list of write requests**. Each write request contains the chunk to write, the encoding (if it's a string), and a callback to invoke when the write completes. As you call `write()` repeatedly, more write requests are appended to this list.
+
+After adding the chunk to the buffer (or passing it to `_write()`), the stream calculates the current buffer size. For byte streams, this is the sum of all buffered chunk lengths. For `objectMode` streams, it's the count of buffered chunks. If this total meets or exceeds `highWaterMark`, `write()` returns `false`. Otherwise, it returns `true`.
+
+A simplified mental model:
+
+```js
+class SimplifiedWritable {
+  constructor(options) {
+    this.highWaterMark = options.highWaterMark || 16384;
+    this.buffer = [];
+    this.bufferSize = 0;
+    this.writing = false;
+  }
+
+  write(chunk) {
+    this.buffer.push(chunk);
+    this.bufferSize += chunk.length;
+
+    if (!this.writing) {
+      this._processBuffer();
+    }
+
+    return this.bufferSize < this.highWaterMark;
+  }
+
+  _processBuffer() {
+    // writes chunks to destination
+  }
+}
+```
+
+This simplified model captures the core idea. The `write()` method adds to a buffer and returns a boolean based on whether the buffer is below the threshold.
+
+What determines how fast the buffer drains? That's entirely up to the `_write()` method's implementation and the underlying destination's performance. If you're writing to a fast SSD, the buffer drains quickly. If you're writing to a slow network connection, the buffer drains slowly. The Writable stream itself doesn't control the drain rate - it only measures it and signals when the buffer is too full.
+
+This is why `highWaterMark` is a **tuning parameter**. If you set it too low, you'll get backpressure signals very frequently, even though the destination could handle more data. This can reduce throughput because you're constantly pausing and resuming. If you set it too high, you'll buffer a lot of data in memory, which might be fine if you have memory to spare, but can lead to problems if you're processing many streams simultaneously or running in a memory-constrained environment.
+
+The **default 16KB** is a reasonable middle ground for most use cases. It's large enough that you're not hitting backpressure constantly for typical write operations, but small enough that you're not buffering massive amounts of data if the destination is slow.
+
+What happens when you ignore backpressure? Suppose you write a million 1KB chunks to a Writable stream that's writing to a slow destination. You call `write()` a million times without checking the return value. Each call adds 1KB to the internal buffer. The buffer grows to 1GB. Your process now has **1GB of data sitting in memory** just for this one stream's buffer, waiting to be written.
+
+If you're processing multiple files simultaneously, or handling multiple concurrent HTTP requests, this memory usage multiplies. You might have 10GB or more of buffered write data across all your streams. At some point, the operating system's memory allocator can't keep up, and your process crashes with an **out-of-memory error**.
+
+This happens frequently in production systems when developers don't respect backpressure. I've debugged memory issues in Node.js applications where the root cause was exactly this: streaming data from a fast source to a slow destination without handling `write()`'s return value.
+
+The fix is simple but requires discipline. **Check the return value. Pause the producer. Wait for `drain`. Resume.** It's a pattern that becomes second nature once you've internalized it.
+
+## Internal Buffering in Writable Streams
+
+The internal buffer's structure and management determines how streams handle memory usage and performance. This will help you reason about memory usage and performance in your streaming code.
+
+The Writable stream maintains a `_writableState` object that tracks its internal state. This object is **private** (indicated by the leading underscore), but it's useful to understand what's in there because it affects the stream's behavior.
+
+One key property is `bufferedRequestCount`, which is exactly what it sounds like: the number of write requests currently buffered. Each time you call `write()`, if the stream is already busy writing, the new chunk becomes a buffered request, and `bufferedRequestCount` increments. As chunks are written to the destination, `bufferedRequestCount` decrements.
+
+Another property is `length`, which tracks the total size of buffered data. For byte streams, this is the sum of all buffered chunk lengths. For `objectMode` streams, this is the count of buffered objects. This is the value that gets compared to `highWaterMark` to determine whether `write()` should return `false`.
+
+There's also a `writing` flag that indicates whether the stream is currently in the middle of a write operation. When `_write()` is called, `writing` is set to `true`. When the callback passed to `_write()` is invoked (indicating the write completed), `writing` is set to `false`. While `writing` is `true`, new chunks get buffered rather than being passed directly to `_write()`.
+
+The buffer itself (in older Node.js versions) was a **linked list** of write request objects. In newer versions, it's implemented as a more efficient data structure, but conceptually it's still a **queue: first-in, first-out**. The oldest buffered chunk is written first, then the next oldest, and so on.
+
+When `write()` is called, the stream checks the `writing` flag. If it's `false`, the chunk is passed immediately to `_write()` along with a callback. The callback is invoked by the `_write()` implementation when the write operation completes (or errors). When that callback runs, the stream checks if there are more buffered chunks. If there are, it pulls the next chunk from the buffer and calls `_write()` again. This continues until the buffer is empty.
+
+If at any point during this process the buffer size drops below `highWaterMark`, and the buffer size was previously at or above `highWaterMark`, the stream emits `drain`. This is the signal that **backpressure is relieved**.
+
+A more detailed mental model:
+
+```js
+class DetailedWritable {
+  constructor(options) {
+    this.highWaterMark = options.highWaterMark || 16384;
+    this.buffer = [];
+    this.length = 0;
+    this.writing = false;
+    this.needDrain = false;
+  }
+
+  write(chunk) {
+    this.buffer.push(chunk);
+    this.length += chunk.length;
+
+    const ret = this.length < this.highWaterMark;
+    if (!ret) {
+      this.needDrain = true;
+    }
+
+    if (!this.writing) {
+      this._doWrite();
+    }
+
+    return ret;
+  }
+
+  _doWrite() {
+    if (this.buffer.length === 0) {
+      if (this.needDrain) {
+        this.needDrain = false;
+        this.emit("drain");
+      }
+      return;
+    }
+
+    const chunk = this.buffer.shift();
+    this.length -= chunk.length;
+    this.writing = true;
+
+    this._write(chunk, (err) => {
+      this.writing = false;
+      if (err) {
+        this.emit("error", err);
+      } else {
+        this._doWrite();
+      }
+    });
+  }
+}
+```
+
+This is still simplified, but it shows the core flow. The `write()` method adds chunks to a buffer and returns `false` if the buffer exceeds `highWaterMark`. The `_doWrite()` method processes the buffer one chunk at a time, calling `_write()` and waiting for its callback before moving to the next chunk. When the buffer is empty and `needDrain` is `true`, `drain` is emitted.
+
+The buffer is a **queue between the producer** (the code calling `write()`) and the underlying destination (the code in `_write()`). The producer can add to the queue as fast as it wants, but if the destination is slow, the queue grows. The backpressure mechanism (`write()` returning `false`, `drain` event) is the feedback loop that tells the producer to slow down when the queue gets too large.
+
+The stream doesn't *enforce* backpressure - it just **signals** it. If you keep calling `write()` even when it returns `false`, the stream will keep buffering. It won't throw an error. It won't drop data. It will just keep growing the buffer until memory runs out. This design choice is intentional - it gives applications flexibility to decide how to handle backpressure. Some applications might have hard real-time constraints and choose to drop data rather than pause. Others might choose to buffer more aggressively because they have memory to spare. But the **default, correct behavior is to pause when `write()` returns `false`**.
+
+The memory used by the buffer is in addition to the memory used by the chunks themselves. Each write request is an object that holds the chunk, encoding, callback, and other metadata. For very large numbers of small writes, the overhead of these objects can be non-trivial. This is one reason why batching small writes into larger chunks can improve performance - fewer write requests means less object overhead.
+
+The `cork()` and `uncork()` methods are specifically designed to optimize buffering for scenarios where you're making many small writes.
+
+When you call `writable.cork()`, the stream enters a **corked state**. In this state, all writes are buffered, and `_write()` is not called at all. The idea is that you're about to make a bunch of small writes, and you want to buffer them all and then write them in one batch.
+
+After you've made all your writes, you call `writable.uncork()`. This flushes the buffered writes. If the stream's `_writev()` method is implemented (which allows writing multiple chunks at once), `uncork()` will call `_writev()` with all the buffered chunks. Otherwise, it calls `_write()` repeatedly for each chunk.
+
+Here's an example:
+
+```js
+writable.cork();
+writable.write("line 1\n");
+writable.write("line 2\n");
+writable.write("line 3\n");
+writable.uncork();
+```
+
+Without `cork()`, each `write()` call might immediately call `_write()`, resulting in three separate I/O operations. With `cork()`, all three writes are buffered, and when `uncork()` is called, they're written together (if `_writev()` is implemented) or sequentially without any pause in between.
+
+This can significantly improve performance when you're making many small writes, because it reduces the number of system calls. Writing three 8-byte chunks in three separate calls to the `write()` syscall is slower than writing one 24-byte chunk in a single call.
+
+However, `cork()` and `uncork()` are not something you need to think about in most application code. They're most useful when you're implementing a library or protocol handler that's generating many small chunks. For typical application code, just calling `write()` directly is fine.
+
+One important note: `cork()` can be called multiple times, and each call increments an internal counter. You need to call `uncork()` the same number of times to actually flush the buffer. This allows **nested corking** in complex code paths.
+
+## Implementing Custom Writable Streams
+
+Understanding how to use Writable streams is one thing. Understanding how they work internally is another. The **best way to solidify that understanding is to implement your own Writable stream**.
+
+The pattern is straightforward. You extend the `Writable` class and implement the `_write()` method. This method receives **three arguments**: the chunk to write, the encoding (if it's a string), and a callback to invoke when the write completes.
+
+Here's the simplest possible custom Writable stream:
+
+```js
+import { Writable } from "stream";
+
+class NullWritable extends Writable {
+  _write(chunk, encoding, callback) {
+    callback(); // write completes immediately
+  }
+}
+```
+
+This is essentially `/dev/null`. It accepts data and does nothing with it. The `_write()` method just calls the callback immediately, signaling that the write succeeded.
+
+A Writable stream that writes to an array:
+
+```js
+class ArrayWritable extends Writable {
+  constructor(options) {
+    super(options);
+    this.data = [];
+  }
+
+  _write(chunk, encoding, callback) {
+    this.data.push(chunk);
+    callback();
+  }
+}
+```
+
+Now chunks are accumulated in the `data` array. Each write just pushes the chunk and calls the callback.
+
+But what if the write operation is **asynchronous**? What if we're writing to a database, or sending data over a network? This is where the callback becomes important. **The callback must be invoked after the asynchronous operation completes.**
+
+A simulated async write:
+
+```js
+class AsyncWritable extends Writable {
+  _write(chunk, encoding, callback) {
+    setTimeout(() => {
+      console.log("Wrote:", chunk.toString());
+      callback();
+    }, 100);
+  }
+}
+```
+
+The `setTimeout` simulates an asynchronous I/O operation that takes 100ms. The callback is invoked inside the `setTimeout` callback, signaling that the write has completed. Until `callback()` is called, the stream won't process the next buffered chunk. **This is how the stream paces itself to match the destination's speed.**
+
+If an error occurs during writing, you pass the error to the callback:
+
+```js
+class ErrorWritable extends Writable {
+  _write(chunk, encoding, callback) {
+    if (chunk.toString().includes("bad")) {
+      callback(new Error("Invalid data"));
+    } else {
+      callback();
+    }
+  }
+}
+```
+
+When you pass an error to the callback, the stream emits an `error` event. Any buffered writes are discarded, and the stream enters an **errored state**.
+
+The `_writev()` method is an **optional optimization** you can implement to handle batch writes more efficiently. If `_writev()` is implemented, and multiple chunks are buffered (or the stream is corked), the stream will call `_writev()` with an array of all buffered chunks instead of calling `_write()` repeatedly.
+
+The `_writev()` signature is slightly different:
+
+```js
+class BatchWritable extends Writable {
+  _writev(chunks, callback) {
+    const allData = Buffer.concat(
+      chunks.map((c) => c.chunk)
+    );
+    console.log("Batch write:", allData.length, "bytes");
+    callback();
+  }
+}
+```
+
+The `chunks` parameter is an array of objects, each with a `chunk` property (the data) and an `encoding` property. You can process them all at once and call the callback when done.
+
+Implementing `_writev()` is optional. If you don't implement it, the stream will call `_write()` once for each buffered chunk. But if your underlying destination has an API for batch writes (like SQL `INSERT` with multiple rows, or a network protocol that supports bundling multiple messages), implementing `_writev()` can **significantly improve performance**.
+
+The `_final()` hook is called when the stream is ending (after `end()` is called and all buffered writes have been processed), but *before* the `finish` event is emitted. It's useful for cleanup or final actions, like closing a file descriptor or flushing a buffer.
+
+```js
+class CleanupWritable extends Writable {
+  _write(chunk, encoding, callback) {
+    // write data
+    callback();
+  }
+
+  _final(callback) {
+    console.log("Finalizing...");
+    // perform cleanup
+    callback();
+  }
+}
+```
+
+The `_final()` callback must be invoked to signal that finalization is complete. After it's called, the stream emits `finish`.
+
+A more realistic custom Writable stream that writes to a log file with a custom format:
+
+```js
+import { Writable } from "stream";
+import { open, write as fsWrite } from "fs";
+
+class LogWritable extends Writable {
+  constructor(filename, options) {
+    super(options);
+    this.filename = filename;
+    this.fd = null;
+    this._open();
+  }
+
+  _open() {
+    open(this.filename, "a", (err, fd) => {
+      if (err) {
+        this.destroy(err);
+      } else {
+        this.fd = fd;
+        this.emit("open", fd);
+      }
+    });
+  }
+
+  _write(chunk, encoding, callback) {
+    if (!this.fd) {
+      this.once("open", () => {
+        this._write(chunk, encoding, callback);
+      });
+      return;
+    }
+
+    const line = `[${new Date().toISOString()}] ${chunk}\n`;
+    fsWrite(this.fd, line, callback);
+  }
+
+  _final(callback) {
+    if (this.fd) {
+      require("fs").close(this.fd, callback);
+    } else {
+      callback();
+    }
+  }
+}
+```
+
+This stream opens a file for appending in the constructor. When `_write()` is called, it formats the chunk with a timestamp and writes it to the file using the low-level `fs.write()` function. In `_final()`, it closes the file descriptor.
+
+Note how `_write()` handles the case where the file isn't open yet by waiting for the `open` event. This is a **common pattern** when the underlying resource initialization is asynchronous.
+
+Implementing custom Writable streams like this gives you **complete control** over where data goes and how it's processed. You can write to databases, to external APIs, to compression streams, to anything. The Writable interface is flexible enough to accommodate any destination.
+
+## Writing to Writable Streams Correctly
+
+With an understanding of how Writable streams work internally, here are the practical patterns for writing to them correctly in application code.
+
+The **most important rule**: always check `write()`'s return value. If it returns `false`, pause your data source and wait for `drain` before continuing.
+
+The pattern in the context of reading from one stream and writing to another:
+
+```js
+import { createReadStream, createWriteStream } from "fs";
+
+const reader = createReadStream("input.txt");
+const writer = createWriteStream("output.txt");
+
+reader.on("data", (chunk) => {
+  const ok = writer.write(chunk);
+  if (!ok) {
+    reader.pause();
+  }
+});
+
+writer.on("drain", () => {
+  reader.resume();
+});
+
+reader.on("end", () => {
+  writer.end();
+});
+```
+
+We call `write()` and capture the return value. If it's `false`, we pause the reader. When `drain` fires on the writer, we resume the reader. This ensures that the writer's buffer never grows unbounded.
+
+When you're done writing, you must call `end()` to signal that no more data will be written. You can optionally pass a final chunk to `end()`:
+
+```js
+writer.end("final chunk");
+```
+
+This is equivalent to:
+
+```js
+writer.write("final chunk");
+writer.end();
+```
+
+After `end()` is called, the stream processes any remaining buffered writes, calls `_final()` if it's implemented, and then emits `finish`. At that point, calling `write()` will throw an error.
+
+The error is specifically a **write-after-end error**, and it looks like this:
+
+```js
+writer.end();
+writer.write("more data"); // throws ERR_STREAM_WRITE_AFTER_END
+```
+
+This is a **common mistake** when you have asynchronous code that writes to a stream and another part of the code calls `end()` before the async writes complete. You need to ensure that all writes are finished before calling `end()`.
+
+In application code, `cork()` and `uncork()` have specific uses. If you're making many small writes in quick succession, you can use `cork()` to buffer them and `uncork()` to flush:
+
+```js
+writer.cork();
+for (let i = 0; i < 1000; i++) {
+  writer.write(`line ${i}\n`);
+}
+writer.uncork();
+```
+
+But in practice, you rarely need to do this manually. If you're using `pipe()` or `pipeline()`, backpressure is handled automatically. If you're writing to a stream directly, the buffering in the stream already provides some batching. **Cork is mainly useful in library code** that's generating structured output, like an HTTP/2 frame encoder or a database protocol handler.
+
+One scenario where manual backpressure handling is unavoidable is when you're generating data from a **non-stream source**. For example, iterating over an array and writing each element:
+
+```js
+async function writeArray(writable, array) {
+  for (const item of array) {
+    const ok = writable.write(item);
+    if (!ok) {
+      await new Promise((resolve) => {
+        writable.once("drain", resolve);
+      });
+    }
+  }
+  writable.end();
+}
+```
+
+This function writes each array element to the stream. If `write()` returns `false`, it waits for the `drain` event before continuing. This ensures that the stream's buffer doesn't overflow, even if the array is huge and the stream is slow.
+
+Another pattern is using Writable streams with async iteration. Node.js provides a `stream.Writable.toWeb()` method that creates a `WritableStream` (from the WHATWG Streams standard), which can be used with async iteration. But that's a more advanced topic we'll cover in the context of modern web APIs.
+
+Writable streams have built-in flow control through the `write()` return value and the `drain` event. **Respecting this flow control is not optional.** It's the difference between code that works under light load but crashes under heavy load, and code that works reliably in production.
+
+A complete example that ties everything together: We'll write a program that reads a large CSV file, parses each line, transforms the data, and writes it to a database. We'll use Writable streams and handle backpressure correctly.
+
+```js
+import { createReadStream } from "fs";
+import { Writable } from "stream";
+import { pipeline } from "stream/promises";
+
+class DatabaseWriter extends Writable {
+  constructor(db) {
+    super({ objectMode: true });
+    this.db = db;
+  }
+
+  async _write(row, encoding, callback) {
+    try {
+      await this.db.insert(row);
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }
+}
+
+async function importCSV(filename, db) {
+  const reader = createReadStream(filename);
+  const parser = parseCSV(); // hypothetical CSV parser
+  const writer = new DatabaseWriter(db);
+
+  await pipeline(reader, parser, writer);
+  console.log("Import complete");
+}
+```
+
+This example uses `pipeline()`, which handles backpressure automatically. The `DatabaseWriter` is a custom Writable that writes each row to a database. The `_write()` method is `async`, which is allowed - you can use async functions or return promises from `_write()`, and Node.js will wait for them to resolve before processing the next chunk.
+
+Notice that we don't manually check `write()` return values or listen for `drain`. That's because `pipeline()` does it for us. This is the **recommended pattern for most streaming code**: use `pipeline()` or `pipe()`, let Node.js handle backpressure, and focus on the transformation logic.
+
+But when you can't use `pipeline()` - when you're dealing with multiple sources or destinations, or when you're integrating with non-stream APIs - you need to handle backpressure manually. And when you do, the pattern is always the same: **check `write()`, pause when it returns `false`, resume when `drain` fires**.
+
+## The Mechanics of Buffer Overflow
+
+Tracing through the exact sequence of events that leads to memory exhaustion helps you understand why the backpressure prevention mechanism exists.
+
+Consider a scenario where you're reading from a fast source and writing to a slow destination. You're copying a 1GB file from an SSD to a network share over a congested link. The SSD can deliver data at 500 MB/sec. The network can only send at 10 MB/sec. That's a **50x speed differential**.
+
+Your code looks like this:
+
+```js
+readable.on("data", (chunk) => {
+  writable.write(chunk); // ignoring return value
+});
+```
+
+The Readable stream starts delivering 64KB chunks as fast as the SSD can provide them. Every **128 microseconds**, a new chunk arrives (64KB at 500 MB/sec). Each chunk is passed to `write()`. The Writable stream attempts to send each chunk over the network, but the network can only handle about one 64KB chunk every **6.4 milliseconds** (64KB at 10 MB/sec).
+
+In the first 6.4 milliseconds, the Readable stream delivers 50 chunks. The Writable stream sends 1 chunk. The other 49 chunks are buffered. That's 3.1MB of buffered data.
+
+After 64 milliseconds, the Readable stream has delivered 500 chunks. The Writable stream has sent 10 chunks. There are 490 chunks buffered. That's 30.6MB.
+
+After one second, there's 490MB buffered. After two seconds, 980MB. At some point, the process runs out of heap space and crashes.
+
+This isn't a gradual slowdown. **The process runs fine until it suddenly dies.** The event loop is responsive right up until the moment the allocator fails to allocate memory for the next buffer, and V8 throws an out-of-memory exception.
+
+In contrast, code that **respects backpressure**:
+
+```js
+readable.on("data", (chunk) => {
+  const ok = writable.write(chunk);
+  if (!ok) {
+    readable.pause();
+  }
+});
+
+writable.on("drain", () => {
+  readable.resume();
+});
+```
+
+When the buffer reaches `highWaterMark` (16KB by default), `write()` returns `false`. The Readable stream is paused. It stops delivering chunks. The Writable stream continues sending buffered chunks over the network. When the buffer drops below `highWaterMark`, `drain` fires, and the Readable stream resumes.
+
+The buffer size oscillates between 0 and `highWaterMark`. It never grows unbounded. Memory usage is bounded by `highWaterMark` plus the size of a single chunk from the Readable stream. For default settings, that's about **32KB total for buffering**, regardless of how large the file is or how slow the destination is.
+
+This is the **power of backpressure**. It decouples the speed of the producer from the speed of the consumer while maintaining bounded memory usage.
+
+But there's a subtlety here that's worth exploring. The `highWaterMark` **isn't a hard limit**. The buffer can exceed `highWaterMark`. What `highWaterMark` controls is *when* `write()` returns `false`. If you call `write()` with a 10MB chunk, and the buffer is empty, the chunk gets buffered, and the buffer size is now 10MB, far exceeding the 16KB `highWaterMark`. But `write()` will return `false` on this call, signaling backpressure.
+
+This means that the actual peak memory usage is **`highWaterMark` plus the size of the largest single chunk**. If you're streaming with 64KB chunks and a 16KB `highWaterMark`, peak buffering is around 80KB. If you're streaming with 1MB chunks, peak buffering is around 1MB. This is why **choosing appropriate chunk sizes matters**, especially in memory-constrained environments.
+
+There's another scenario where ignoring backpressure causes problems: **writing from multiple producers to a single Writable stream**. Suppose you have 10 concurrent operations all writing to the same log file stream. If none of them respect backpressure, and each is producing data as fast as possible, the buffer grows to accommodate all 10 streams' output. What might be 16KB of buffering for one stream becomes 160KB or more for 10 streams. Multiply this across hundreds or thousands of concurrent operations in a busy server, and you have a memory leak.
+
+The solution is the same: respect backpressure. Each producer checks `write()`'s return value and pauses when it returns `false`. The Writable stream emits `drain` once, and all paused producers resume. The buffer stays bounded.
+
+## Error Handling in Writable Streams
+
+We've talked about the happy path - data flows, backpressure is respected, the stream ends cleanly. But what happens when things go wrong?
+
+Errors in Writable streams can occur at several points. The underlying destination might fail - the disk might fill up, the network might disconnect, a permission error might occur. The data itself might be invalid for the destination. The stream might be in an invalid state when an operation is attempted.
+
+When an error occurs in `_write()`, `_writev()`, or `_final()`, the error is passed to the callback. The stream handles this by emitting an `error` event. After an `error` event is emitted, the stream enters an **errored state**. Any buffered writes are discarded, and further writes will throw an error.
+
+This looks like:
+
+```js
+class FailingWritable extends Writable {
+  _write(chunk, encoding, callback) {
+    callback(new Error("Write failed"));
+  }
+}
+
+const writable = new FailingWritable();
+
+writable.on("error", (err) => {
+  console.error("Stream error:", err.message);
+});
+
+writable.write("test"); // triggers error event
+writable.write("more"); // throws ERR_STREAM_DESTROYED
+```
+
+The first `write()` triggers the `error` event. After that, the stream is destroyed, and subsequent writes throw an exception.
+
+If you don't attach an `error` event listener, the error is thrown, potentially crashing your process. **You must always attach error handlers to streams**, especially in production code. An unhandled stream error is one of the most common causes of unexpected Node.js process crashes.
+
+There's a pattern for handling errors gracefully in stream pipelines, which we'll cover in depth in the sub-chapter on pipelines. But for now, understand that **error handling is not optional**. Every Writable stream you create or receive must have an error handler.
+
+Another error scenario is calling `write()` after calling `end()`. This is a **programming error**, not a runtime error. It indicates a bug in your code's logic. When you call `end()`, you're telling the stream "no more writes." If you then call `write()`, the stream throws an `ERR_STREAM_WRITE_AFTER_END` error.
+
+This often happens in asynchronous code where multiple code paths are writing to the same stream, and one path calls `end()` while another still has writes pending. The fix is to coordinate your code so that `end()` is only called after all writes are complete. This might involve using `Promise.all()` to wait for all async writes, or using a counter to track pending writes.
+
+An example of the problem:
+
+```js
+async function buggyWrite(writable) {
+  setTimeout(() => {
+    writable.write("async write");
+  }, 100);
+
+  writable.end(); // called before async write
+}
+```
+
+And the fix:
+
+```js
+async function correctWrite(writable) {
+  await new Promise((resolve) => {
+    setTimeout(() => {
+      writable.write("async write", resolve);
+    }, 100);
+  });
+
+  writable.end();
+}
+```
+
+Now `end()` is only called after the async write completes.
+
+There's also the `destroy()` method, which forcefully closes the stream and optionally emits an error. Calling `writable.destroy(err)` immediately puts the stream in a destroyed state, discards buffered writes, and emits `error` (if `err` is provided) followed by `close`.
+
+```js
+writable.destroy(new Error("Aborted"));
+```
+
+This is useful when you need to cancel an in-progress stream operation, like when a user cancels a file upload. `destroy()` doesn't wait for buffered writes to complete - it's an **immediate, forceful shutdown**.
+
+The `destroyed` property tells you if a stream has been destroyed:
+
+```js
+if (!writable.destroyed) {
+  writable.write("data");
+}
+```
+
+Using this check can prevent errors in code that might attempt to write to a stream that's already been destroyed.
+
+## Properties and Introspection
+
+Writable streams expose several properties that let you introspect their current state. These are useful for debugging, monitoring, and making runtime decisions about flow control.
+
+The `writableLength` property tells you how many bytes (or objects in `objectMode`) are currently buffered:
+
+```js
+console.log(writable.writableLength);
+```
+
+If this value is approaching `writableHighWaterMark`, you know backpressure is about to be signaled. You might use this to implement soft rate limiting or to provide feedback to users about upload progress.
+
+The `writableHighWaterMark` property exposes the `highWaterMark` value:
+
+```js
+console.log(writable.writableHighWaterMark);
+```
+
+This is the threshold that determines when `write()` returns `false`. It's set during stream construction and generally doesn't change, but you can read it to understand the stream's buffering behavior.
+
+The `writable` property is a boolean indicating whether it's safe to call `write()`:
+
+```js
+if (writable.writable) {
+  writable.write("data");
+}
+```
+
+This is `false` if the stream has been destroyed or ended. It's a quick check before attempting a write.
+
+The `writableEnded` property tells you if `end()` has been called:
+
+```js
+console.log(writable.writableEnded);
+```
+
+This is `true` after `end()` is called, even if the `finish` event hasn't fired yet. It indicates that no more writes will be accepted.
+
+The `writableFinished` property tells you if the `finish` event has been emitted:
+
+```js
+console.log(writable.writableFinished);
+```
+
+This is `true` after all writes have been processed and `finish` has fired. It indicates that the stream has completed its work.
+
+The `writableCorked` property tells you how many times `cork()` has been called without a corresponding `uncork()`:
+
+```js
+writable.cork();
+writable.cork();
+console.log(writable.writableCorked); // 2
+```
+
+This is mainly useful for debugging `cork()`/`uncork()` usage.
+
+The `writableObjectMode` property tells you if the stream is in `objectMode`:
+
+```js
+console.log(writable.writableObjectMode);
+```
+
+This is set during construction and doesn't change. It's useful when writing generic code that handles both byte streams and object streams.
+
+These properties give you visibility into the stream's internal state. In most application code, you won't need them. But when debugging stream issues, or when implementing generic stream utilities, they're **invaluable**.
+
+## The Write Request Queue Deep Dive
+
+Understanding how write requests are managed internally in the queue structure helps you reason about performance and memory usage.
+
+When you call `write()`, the chunk and its associated metadata are wrapped in a **write request object**. This object contains:
+
+- The chunk itself (`Buffer`, string, or object)
+- The encoding (if it's a string)
+- The callback to invoke when the write completes (optional)
+- A reference to the next write request in the queue
+
+These write request objects form a **linked list**. The head of the list is the write request currently being processed. The tail is the most recently added request. When you call `write()`, a new write request is appended to the tail.
+
+When `_write()` completes (when its callback is invoked), the current write request is removed from the head of the list, and the next request becomes the new head. If there's a next request, `_write()` is called again with that request's chunk. If there's no next request, the queue is empty, and the stream waits for more `write()` calls.
+
+This queue structure has implications for memory usage. Each write request object has **overhead** - pointers, metadata, closures. For small writes, this overhead can be significant relative to the chunk size. If you call `write()` a million times with 1-byte chunks, you have a million write request objects, each with 50-100 bytes of overhead. That's 50-100 MB of memory just for the queue structure, even though the actual data is only 1 MB.
+
+This is why **batching small writes improves performance**. Instead of a million 1-byte writes, do 1000 1KB writes. The data is the same, but the queue overhead is 1/1000th.
+
+The `cork()` and `uncork()` methods interact with this queue. When you cork a stream, `write()` still creates write request objects and appends them to the queue, but `_write()` is not called. The requests accumulate. When you uncork, if `_writev()` is implemented, all accumulated requests are passed to `_writev()` in a single call. Otherwise, `_write()` is called repeatedly for each request.
+
+A corked write sequence:
+
+```js
+writable.cork();
+writable.write("a"); // creates request, queues it
+writable.write("b"); // creates request, queues it
+writable.write("c"); // creates request, queues it
+writable.uncork(); // calls _writev(["a", "b", "c"])
+```
+
+Without `cork()`:
+
+```js
+writable.write("a"); // creates request, calls _write("a")
+writable.write("b"); // creates request, queues it
+writable.write("c"); // creates request, queues it
+// as each _write completes, the next is called
+```
+
+The difference is that in the corked case, **all three chunks can be written in a single I/O operation** if `_writev()` is implemented efficiently. In the uncorked case, each chunk is written separately, resulting in three I/O operations.
+
+For some destinations, like network sockets or files, reducing the number of I/O operations significantly improves throughput. For others, like in-memory arrays, it doesn't matter. This is why `_writev()` is optional - it's an optimization that's only worthwhile when the destination benefits from batching.
+
+## ObjectMode Writable Streams
+
+We've mostly talked about byte streams, but `objectMode` is a critical feature for building data processing pipelines. In `objectMode`, the behavior of Writable streams changes in specific ways.
+
+In `objectMode`, `highWaterMark` is measured in **object count**, not byte count. The default is 16 objects. When you write objects to an `objectMode` stream, the stream increments its buffer count by 1 for each object, regardless of the object's size in memory.
+
+This means that `highWaterMark` in `objectMode` **is not a memory limit**. It's a count limit. If you write 16 objects, each of which is a 10MB buffer, the stream has buffered 160MB of data, even though `highWaterMark` is 16.
+
+This is intentional. `objectMode` is designed for scenarios where each chunk represents a **logical unit of work**, and you want to limit the number of units in flight, not the total byte size. For example, if you're processing database rows, you might want to buffer 100 rows at a time, regardless of whether each row is 100 bytes or 10KB.
+
+Implementing an `objectMode` Writable is the same as a byte stream, except you set `objectMode: true` in the options:
+
+```js
+class RowWriter extends Writable {
+  constructor(db, options) {
+    super({ ...options, objectMode: true });
+    this.db = db;
+  }
+
+  async _write(row, encoding, callback) {
+    try {
+      await this.db.insert(row);
+      callback();
+    } catch (err) {
+      callback(err);
+    }
+  }
+}
+```
+
+Each `write()` call passes a row object. The `_write()` method receives the row and inserts it into the database. The `encoding` parameter is ignored in `objectMode` (it's always `'buffer'`), but it's still passed to maintain the signature.
+
+One common pattern is converting a byte stream to an `objectMode` stream using a `Transform`. For example, parsing JSON lines:
+
+```js
+import { Transform } from "stream";
+
+class JSONLineParser extends Transform {
+  constructor(options) {
+    super({ ...options, objectMode: true });
+    this.buffer = "";
+  }
+
+  _transform(chunk, encoding, callback) {
+    this.buffer += chunk.toString();
+    const lines = this.buffer.split("\n");
+    this.buffer = lines.pop(); // incomplete line
+
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          this.push(JSON.parse(line));
+        } catch (err) {
+          return callback(err);
+        }
+      }
+    }
+    callback();
+  }
+}
+```
+
+This `Transform` reads byte chunks, accumulates them into lines, and pushes parsed JSON objects. The output is an `objectMode` stream, even though the input is a byte stream.
+
+`objectMode` streams are essential for building composable data pipelines where each stage processes logical records rather than byte chunks. They're common in **ETL** (extract, transform, load) systems, log processing, data import/export, and anywhere you're dealing with structured data.
+
+## The `_final()` Hook in Detail
+
+The `_final()` method deserves more attention because it's often misunderstood. It's **not a destructor**. It's not called when the stream is destroyed. It's called when the stream is ending normally, after all writes have completed, but *before* the `finish` event is emitted.
+
+The purpose of `_final()` is to perform any cleanup or final writes that need to happen before the stream is considered finished. For example, if you're writing to a compressed file, `_final()` is where you'd write the final compression footer. If you're accumulating data for a batch write, `_final()` is where you'd flush that batch.
+
+A Writable that accumulates writes and flushes them in batches:
+
+```js
+class BatchingWritable extends Writable {
+  constructor(batchSize, options) {
+    super(options);
+    this.batchSize = batchSize;
+    this.batch = [];
+  }
+
+  _write(chunk, encoding, callback) {
+    this.batch.push(chunk);
+    if (this.batch.length >= this.batchSize) {
+      this._flush(callback);
+    } else {
+      callback();
+    }
+  }
+
+  _final(callback) {
+    if (this.batch.length > 0) {
+      this._flush(callback);
+    } else {
+      callback();
+    }
+  }
+
+  _flush(callback) {
+    const data = Buffer.concat(this.batch);
+    this.batch = [];
+    // write data to destination
+    callback();
+  }
+}
+```
+
+The `_write()` method adds chunks to a batch. When the batch reaches `batchSize`, it's flushed. The `_final()` method ensures that any remaining partial batch is flushed when the stream ends.
+
+**Without `_final()`, the partial batch would be lost** when the stream ends. The `finish` event would fire, but the last few chunks wouldn't have been written to the destination. This is a **common bug** in custom Writable streams that perform batching or buffering.
+
+The `_final()` callback must be invoked, just like the `_write()` callback. If you don't invoke it, the `finish` event never fires, and the stream hangs. If you pass an error to the callback, the stream emits an `error` event instead of `finish`.
+
+An async version:
+
+```js
+async _final(callback) {
+  try {
+    await this.flushAsync();
+    callback();
+  } catch (err) {
+    callback(err);
+  }
+}
+```
+
+Or, since Node.js supports returning promises from stream methods, you can omit the callback:
+
+```js
+async _final() {
+  await this.flushAsync();
+}
+```
+
+If `_final()` returns a promise, Node.js waits for it to resolve before emitting `finish`, or emits `error` if it rejects.
+
+## Rate-Limited Custom Writable
+
+A more complex custom Writable stream that rate-limits writes to a destination: This demonstrates several advanced concepts: backpressure management, timing control, and queue manipulation.
+
+```js
+import { Writable } from "stream";
+
+class RateLimitedWritable extends Writable {
+  constructor(dest, bytesPerSecond, options) {
+    super(options);
+    this.dest = dest;
+    this.bytesPerSecond = bytesPerSecond;
+    this.tokens = bytesPerSecond;
+    this.lastRefill = Date.now();
+  }
+
+  _write(chunk, encoding, callback) {
+    this._refillTokens();
+
+    if (this.tokens >= chunk.length) {
+      this.tokens -= chunk.length;
+      this.dest.write(chunk, encoding, callback);
+    } else {
+      const wait = ((chunk.length - this.tokens) / this.bytesPerSecond) * 1000;
+      setTimeout(() => {
+        this.tokens = 0;
+        this.dest.write(chunk, encoding, callback);
+      }, wait);
+    }
+  }
+
+  _refillTokens() {
+    const now = Date.now();
+    const elapsed = (now - this.lastRefill) / 1000;
+    this.tokens = Math.min(
+      this.bytesPerSecond,
+      this.tokens + elapsed * this.bytesPerSecond
+    );
+    this.lastRefill = now;
+  }
+}
+```
+
+This stream uses a **token bucket algorithm** to rate-limit writes. It maintains a count of available tokens (bytes). Each second, `bytesPerSecond` tokens are added. When writing, if there are enough tokens, the write happens immediately. If not, the write is delayed until enough time has passed to accumulate the needed tokens.
+
+The `_refillTokens()` method is called before each write to add tokens based on elapsed time. The `_write()` method checks if there are enough tokens, and if not, schedules the write for later using `setTimeout`.
+
+This pattern can be adapted for various rate-limiting scenarios: limiting requests per second to an API, throttling log writes, pacing data exports, etc.
+
+Note that this implementation doesn't invoke the callback immediately if the write is delayed. The callback is passed to `setTimeout` and eventually to the destination's `write()` call. This means the Writable stream's internal queue is blocked while waiting. This is **correct behavior** - the stream should signal backpressure if writes are being rate-limited, which happens naturally because the callback isn't invoked until the delayed write completes.
+
+## Backpressure Across Multiple Writers
+
+We touched on this earlier, but it's worth exploring in more depth. When multiple producers are writing to a single Writable stream, backpressure becomes more complex.
+
+Each producer calls `write()` independently. Each sees the return value indicating whether the buffer is full. But the `drain` event is broadcast to all listeners. When one producer pauses because `write()` returned `false`, and then `drain` fires, all paused producers resume simultaneously.
+
+This can lead to a **thundering herd problem**. Suppose 100 producers are all paused waiting for `drain`. When `drain` fires, all 100 resume and immediately call `write()`. The buffer, which just drained, instantly fills up again, and all 100 producers pause again.
+
+The stream oscillates between drained and full, making no forward progress. This is an extreme case, but it illustrates a real issue: coordinating backpressure across multiple producers is non-trivial.
+
+One solution is to use a queue at a higher level. Instead of having 100 producers write directly to the stream, have them enqueue their data, and have a single consumer read from the queue and write to the stream. The single consumer handles backpressure, and the queue coordinates the producers.
+
+Another solution is to use a semaphore or similar coordination primitive to limit how many producers can write concurrently. Only N producers are allowed to write at once. When one finishes, another gets a turn. This prevents the thundering herd.
+
+In practice, the simplest solution is often to **avoid having many concurrent writers to a single stream**. If you need to aggregate writes from multiple sources, consider using a higher-level abstraction, like a log library that internally coordinates writes, or a stream multiplexer that interleaves data from multiple sources.
+
+**Backpressure is a per-stream signal, not a per-producer signal.** If you have multiple producers, you need higher-level coordination to avoid pathological behavior.
+
+## Memory Profiling a Writable Stream
+
+Debugging memory issues in code that uses Writable streams requires systematic approaches. Suppose your application's memory usage is growing over time, and you suspect it's related to streaming. How do you diagnose it?
+
+First, check if you're respecting backpressure. Add logging to your `write()` calls:
+
+```js
+const ok = writable.write(chunk);
+if (!ok) {
+  console.log("Backpressure! Buffer size:", writable.writableLength);
+}
+```
+
+If you see "Backpressure!" messages but your code isn't pausing, that's the problem. You're **ignoring backpressure**.
+
+If you are pausing correctly but memory is still growing, check `writableLength` periodically:
+
+```js
+setInterval(() => {
+  console.log("Buffer size:", writable.writableLength);
+}, 1000);
+```
+
+If this value is steadily increasing, the stream's buffer is growing, which means the destination is slower than the producer. This might be expected (if the destination is legitimately slow), or it might indicate a problem with the destination (if it's blocked or stalled).
+
+Use Node.js's built-in **heap snapshot feature** to see where memory is allocated:
+
+```js
+const v8 = require("v8");
+const fs = require("fs");
+
+const snapshot = v8.writeHeapSnapshot();
+console.log("Heap snapshot written to", snapshot);
+```
+
+Load the snapshot in Chrome DevTools to see object allocations. Look for large numbers of `Buffer` objects or write request objects. If you see millions of small objects related to streams, you've found your leak.
+
+Another useful tool is the `--trace-gc` flag, which logs garbage collection events:
+
+```
+node --trace-gc app.js
+```
+
+If you see frequent GC cycles and high memory usage despite GC running, it means you're allocating faster than GC can reclaim, which is consistent with an unbounded buffer growing.
+
+For production monitoring, track `writable.writableLength` as a metric. If it's consistently near `writableHighWaterMark`, you're hitting backpressure frequently, which might indicate a bottleneck in your pipeline.
+
+## Combining Multiple Writables
+
+Sometimes you need to write the same data to multiple destinations simultaneously. For example, writing to a file and to a database, or sending data to multiple network endpoints. How do you structure this?
+
+One approach is to write to multiple streams manually:
+
+```js
+function writeToAll(writables, chunk) {
+  const results = writables.map((w) => w.write(chunk));
+  return results.every((r) => r === true);
+}
+
+const ok = writeToAll([writable1, writable2], chunk);
+if (!ok) {
+  // at least one stream signaled backpressure
+}
+```
+
+This works, but handling backpressure is tricky. If one stream signals backpressure but others don't, should you pause? If you wait for all streams to drain, the fast streams are unnecessarily slowed down. If you don't wait, the slow stream's buffer grows.
+
+A better approach is to use a fan-out stream that handles this internally:
+
+```js
+class FanOutWritable extends Writable {
+  constructor(destinations, options) {
+    super(options);
+    this.destinations = destinations;
+  }
+
+  _write(chunk, encoding, callback) {
+    let pending = this.destinations.length;
+    let error = null;
+
+    const done = (err) => {
+      if (err) error = err;
+      if (--pending === 0) {
+        callback(error);
+      }
+    };
+
+    this.destinations.forEach((dest) => {
+      dest.write(chunk, encoding, done);
+    });
+  }
+}
+```
+
+This stream writes to all destinations concurrently and waits for all to complete before invoking the callback. If any destination errors, the error is passed to the callback. Backpressure is handled naturally - the callback isn't invoked until all destinations finish, so if one is slow, the `FanOutWritable`'s buffer fills up, signaling backpressure to its producer.
+
+This pattern is useful for logging to multiple outputs, replicating data, or broadcasting events.
+
+## Choosing highWaterMark for Writable Streams
+
+We've mentioned `highWaterMark` throughout this chapter, but how do you choose the right value?
+
+The **default 16KB** is a reasonable balance for most scenarios. It's large enough to avoid excessive backpressure signals for typical write patterns, but small enough that you're not buffering unreasonable amounts of data.
+
+If you're writing large chunks, consider **increasing `highWaterMark` to match**. If your chunks are 1MB each, a 16KB `highWaterMark` means you'll signal backpressure on every write, which is inefficient. Setting `highWaterMark` to 2MB or 4MB gives the stream some breathing room.
+
+If you're running in a **memory-constrained environment** (like a Docker container with strict limits, or on an embedded device), consider decreasing `highWaterMark` to reduce memory footprint. Setting it to 4KB or 8KB means less data is buffered at any given time.
+
+If you're processing many streams concurrently, multiply your per-stream `highWaterMark` by the number of concurrent streams to estimate total buffer memory usage. If you have 1000 concurrent HTTP response streams, and each has a 16KB `highWaterMark`, that's potentially 16MB of buffer memory just for stream buffers. If that's too much, lower the `highWaterMark`.
+
+For `objectMode` streams, `highWaterMark` controls the **object count**, not byte size. Choose a value based on how many objects you want in flight. For database writes, 100 or 1000 might make sense. For file parsing, 10 or 50 might be appropriate. There's no universal answer - it depends on your objects' size and your throughput requirements.
+
+One technique is to make `highWaterMark` **configurable** and tune it based on observed performance. Start with defaults, measure throughput and memory usage, and adjust as needed.
+
+Remember that `highWaterMark` is a **threshold, not a limit**. The buffer can exceed `highWaterMark`, especially if chunks are large. So don't treat `highWaterMark` as a hard memory budget - treat it as a signal point.
