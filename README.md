@@ -42,10 +42,6 @@ The book is also packed with actual, runnable examples. Not snippets that sorta-
 
 # How you can help
 
-I’m open-sourcing it because the community has saved my life more times than I can count - random GitHub issues, a stray SO answer at 2 AM, that one PR that explained everything. I need contributors, reviewers, and - most importantly - your war stories. Weird bugs, weird fixes, performance hacks, architecture mistakes that turned into debt: they all make chapters better.
-
-If you’re just starting, don’t be intimidated. Start at the beginning. The gnarly Turbofan stuff will wait until you ask for it.
-
 Hit up the [website](https://www.thenodebook.com) and start reading. Find issues, suggest improvements, or just learn something new. Check out the [GitHub repo](https://github.com/ishtms/nodebook) if you want to contribute directly. And if you're the kind of person who likes being early to things, there's an early-access list where you'll get chapters before they go live, plus you can help shape how this thing turns out.
 
 This book exists because I believe deep knowledge makes better engineers. Not because you need it for your next CRUD app, but because when things inevitably go wrong, you'll know why. And more importantly, you'll know how to fix it.
