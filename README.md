@@ -3,7 +3,6 @@
 ![NodeBook Cover](/public/nodebook_cover.jpg)
 
 > [!INFO]
->
 > For better experience, I'd recommend reading it on the website - [NodeBook Website](https://thenodebook.com)
 
 NodeBook is my my way of explaining everything about Server side developement using Node.js, it's internals and the parts that matter when apps misbehave.
