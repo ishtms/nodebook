@@ -2,6 +2,10 @@
 
 ![NodeBook Cover](/public/nodebook_cover.jpg)
 
+> [!INFO]
+>
+> For better experience, I'd recommend reading it on the website - [NodeBook Website](https://thenodebook.com)
+
 NodeBook is my my way of explaining everything about Server side developement using Node.js, it's internals and the parts that matter when apps misbehave.
 
 I started writing it because most Node material stops too early. You learn routes, middleware, promises, maybe some streams, then the hard parts get left as "go read the docs" or "profile it". Memory leaks, slow requests, blocked event loop, file descriptor limits, weird DNS behavior, broken backpressure, GC pauses, module loading issues. That is where Node starts getting interesting.
