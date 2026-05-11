@@ -29,9 +29,9 @@ The method returns the destination stream, allowing you to chain pipes:
 readable.pipe(transform1).pipe(transform2).pipe(writable);
 ```
 
-This creates a four-stage pipeline: readable -> transform1 -> transform2 -> writable. Data flows through each stage sequentially, with **backpressure propagating backward** from the writable destination all the way to the readable source—a pattern we explored in detail in the Writable Streams chapter. If `writable` signals backpressure, the entire chain pauses; when `writable` emits `drain`, the resume signal propagates forward.
+This creates a four-stage pipeline: readable -> transform1 -> transform2 -> writable. Data flows through each stage sequentially, with **backpressure propagating backward** from the writable destination all the way to the readable source-a pattern we explored in detail in the Writable Streams chapter. If `writable` signals backpressure, the entire chain pauses; when `writable` emits `drain`, the resume signal propagates forward.
 
-A concrete example—compressing a log file:
+A concrete example-compressing a log file:
 
 ```js
 import { createReadStream, createWriteStream } from "fs";
@@ -218,7 +218,7 @@ This is the **recommended pattern** for modern Node.js code. Use `stream/promise
 
 Understanding the internals helps you reason about behavior and debug issues. When you call `pipeline(s1, s2, s3, callback)`, the function essentially:
 
-1. Connects streams using the same `pipe()` mechanics you learned in earlier chapters—the same automatic backpressure handling we covered in the Writable Streams chapter
+1. Connects streams using the same `pipe()` mechanics you learned in earlier chapters-the same automatic backpressure handling we covered in the Writable Streams chapter
 
 2. Attaches error listeners to all streams for coordinated error handling
 
@@ -702,7 +702,7 @@ for await (const chunk of readableStream) {
 }
 ```
 
-We won't repeat the full backpressure mechanics here—refer to the "Backpressure in Async Iteration" section in the Readable Streams chapter for the complete explanation of how the iterator protocol manages flow control.
+We won't repeat the full backpressure mechanics here-refer to the "Backpressure in Async Iteration" section in the Readable Streams chapter for the complete explanation of how the iterator protocol manages flow control.
 
 What's relevant to this chapter is using this pattern specifically for **pipeline construction** rather than `pipeline()`. You can build pipelines by reading from a source with `for await...of`, transforming each chunk, and writing to a destination:
 
@@ -721,7 +721,7 @@ for await (const chunk of source) {
 dest.end();
 ```
 
-This is a manual pipeline. You're pulling from the source, transforming, and writing to the destination, with explicit backpressure handling (wait for `drain` if `write()` returns false). This pattern gives you fine-grained control over the data flow, but it requires you to manage backpressure manually—forgetting the `drain` check leads to unbounded memory growth, as we discussed in the Writable Streams chapter.
+This is a manual pipeline. You're pulling from the source, transforming, and writing to the destination, with explicit backpressure handling (wait for `drain` if `write()` returns false). This pattern gives you fine-grained control over the data flow, but it requires you to manage backpressure manually-forgetting the `drain` check leads to unbounded memory growth, as we discussed in the Writable Streams chapter.
 
 A cleaner pattern is to use `stream.Readable.from()` with an async generator:
 
@@ -815,7 +815,7 @@ for await (const chunk of source) {
 }
 ```
 
-The advantage of this approach over `pipeline()` is explicit control over data flow. The disadvantage is that you must manage error handling yourself—there's no automatic cleanup like `pipeline()` provides.
+The advantage of this approach over `pipeline()` is explicit control over data flow. The disadvantage is that you must manage error handling yourself-there's no automatic cleanup like `pipeline()` provides.
 
 For the full mechanics of how the async iterator protocol implements backpressure, see the "Backpressure in Async Iteration: How It Works" section in the Readable Streams chapter.
 
@@ -823,7 +823,7 @@ For the full mechanics of how the async iterator protocol implements backpressur
 
 In the Transform Streams chapter, we covered how to implement custom transforms. Now let's look at building **reusable pipeline components** through factory functions.
 
-The pattern is straightforward—create functions that return configured stream instances:
+The pattern is straightforward-create functions that return configured stream instances:
 
 ```js
 function createCSVParser() {
@@ -1249,7 +1249,7 @@ for await (const chunk of source) {
 }
 ```
 
-When you split on `\n`, the last array element is either empty (if the chunk ended with a newline) or an incomplete line. Popping that element and saving it means the next chunk appends to it, completing the line. After the loop ends, any remaining buffered data gets processed—handling files that don't end with a newline.
+When you split on `\n`, the last array element is either empty (if the chunk ended with a newline) or an incomplete line. Popping that element and saving it means the next chunk appends to it, completing the line. After the loop ends, any remaining buffered data gets processed-handling files that don't end with a newline.
 
 The `try/catch` around `JSON.parse()` is critical:
 
@@ -1379,7 +1379,7 @@ await pipeline(
 
 This pipeline uses composable generator functions for data transformation and batching for database operations.
 
-Unlike `parseLines`, `parseCSV` maintains state across chunks—it needs to remember the header row:
+Unlike `parseLines`, `parseCSV` maintains state across chunks-it needs to remember the header row:
 
 ```js
 let buffer = "";
@@ -1416,7 +1416,7 @@ Becomes structured objects:
 { name: "Bob", email: "bob@example.com", age: "25" }
 ```
 
-We don't load the entire CSV into memory—each row is processed as data flows through.
+We don't load the entire CSV into memory-each row is processed as data flows through.
 
 The `validate` generator filters without modifying data:
 
@@ -1434,7 +1434,7 @@ async function* validate(source, schema) {
 
 Valid rows continue downstream. Invalid rows are logged but not yielded, preventing bad data from reaching the database.
 
-Throwing an error on invalid data would crash the pipeline and lose all progress. Real-world data is messy—logging and continuing lets you review errors after the import completes.
+Throwing an error on invalid data would crash the pipeline and lose all progress. Real-world data is messy-logging and continuing lets you review errors after the import completes.
 
 The `batch` generator is essential for database operations:
 

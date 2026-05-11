@@ -536,7 +536,7 @@ V8 will deoptimize for many reasons, but some culprits are far more common than 
 
 2.  **Changing Array Element Kinds -** V8 tracks the "kind" of elements in an array. Is it all small integers? All doubles? All objects? It optimizes based on this. If you have an array `[1, 2, 3]` (packed small integers, the fastest kind) and you suddenly push a string `arr.push('a')`, you've forced a storage transition. V8 dynamically upgrades the array to handle the new element type, and any optimized code that assumed an integer array may need to deoptimize. Not all transitions cause persistent slowdowns - V8 handles many efficiently - but in hot loops with large arrays, these transitions can impact performance.
 
-3.  **`try...catch` Blocks (Historical Issue) -** This was problematic in older V8 versions, where the machinery needed to handle exceptions could interfere with TurboFan's optimizations. Modern V8 (Node v16+) has largely resolved this issue. In current Node versions (v22-24), `try...catch` has minimal performance impact in most cases. Use error handling freely for correctness – the old advice to avoid `try...catch` is outdated.
+3.  **`try...catch` Blocks (Historical Issue) -** This was problematic in older V8 versions, where the machinery needed to handle exceptions could interfere with TurboFan's optimizations. Modern V8 (Node v16+) has largely resolved this issue. In current Node versions (v22-24), `try...catch` has minimal performance impact in most cases. Use error handling freely for correctness - the old advice to avoid `try...catch` is outdated.
 
 > [!TIP]
 >
@@ -544,7 +544,7 @@ V8 will deoptimize for many reasons, but some culprits are far more common than 
 
 4.  **Using `arguments` Object -** The `arguments` object is a classic deoptimizer. It's an "array-like" object, but it's not a true array and has some magic properties that make it difficult for compilers to reason about. Using it, especially in older versions of Node, was a guaranteed way to kill performance. Modern V8 is better, but a function that leaks `arguments` can still be problematic. Rest parameters (`...args`) are almost always a better, optimization-friendly choice.
 
-5.  **The `delete` Keyword -** While V8 has improved its handling of `delete` over the years, it still degrades performance on hot objects. Using `delete obj.x` can force V8 to switch the object into "dictionary mode," where properties are stored in a slower hash map-like structure. If you only need to clear a value on a hot path, use `obj.x = undefined`. However, if you need the property truly gone for correctness (e.g., for key enumeration or the `in` operator), `delete` remains the right choice – just avoid it in performance-critical paths.
+5.  **The `delete` Keyword -** While V8 has improved its handling of `delete` over the years, it still degrades performance on hot objects. Using `delete obj.x` can force V8 to switch the object into "dictionary mode," where properties are stored in a slower hash map-like structure. If you only need to clear a value on a hot path, use `obj.x = undefined`. However, if you need the property truly gone for correctness (e.g., for key enumeration or the `in` operator), `delete` remains the right choice - just avoid it in performance-critical paths.
 
 > [!IMPORTANT]
 >

@@ -11,380 +11,345 @@ published: true
 toc: true
 ---
 
-Every file operation in Node.js bottoms out at a single thing: an integer (or on Windows, an opaque pointer that Node abstracts into an integer). `fs.readFile()`, `fs.createReadStream()`, `fs.writeFile()` - under every one of these sits a small number that the operating system gave to your process. That number is the file descriptor.
+Every file operation in Node uses a small process-local token.
 
-> [!NOTE]
-> **Opaque pointers** are memory addresses where the internal structure of the data being pointed to is hidden from the caller. Windows uses these `HANDLE` types for everything. You hold the pointer, but only the OS knows how to dereference it to read the actual state.
+On POSIX systems, that token is a file descriptor: a non-negative integer indexing the process's file descriptor table. On Windows, the OS gives libuv a `HANDLE`, and libuv presents a descriptor-shaped value back to Node. JavaScript mostly sees the same thing either way. An integer. Pass it to a read. Pass it to a write. Close it when the work is done.
 
-You've probably seen it. Call `fs.openSync('/tmp/foo', 'r')` and you get back something like `22`. An integer. You pass it to `fs.readSync()`, then to `fs.closeSync()`, and that's the lifecycle. Open, use, close. The number itself means nothing outside your process. It's an index into a table the kernel maintains, one per process, mapping these integers to internal data structures that track open files (on POSIX systems).
-
-> [!NOTE]
-> **POSIX** (Portable Operating System Interface) is a family of standards specified by the IEEE Computer Society for maintaining compatibility between operating systems. Linux, macOS, and BSDs are POSIX-compliant. Windows is not.
-
-The reason file descriptors exist at all comes down to how operating systems manage I/O. Your process can't touch the disk directly. The kernel mediates every read, every write. File descriptors are the reference tokens it hands you - your process says "read 4096 bytes from descriptor 22" and the kernel looks up what file that maps to, checks permissions, does the read, and copies data back into your address space. The integer is just an indirection layer. But it governs everything.
-
-> [!NOTE]
-> The **kernel** is the core component of the OS with complete control over the system, operating in an isolated memory area. Your userland process runs in a restricted **address space**-a mapped range of memory it is allowed to access. An **indirection layer** means you interact with a proxy token (the descriptor) while the kernel maps it to the actual resource.
-
-## The Per-Process File Descriptor Table
-
-When a process starts, the kernel sets up a file descriptor table for it. On POSIX systems (Linux, macOS, BSDs), file descriptors are non-negative integers starting from 0. Three slots are already filled before your code runs a single line:
-
-- **0** - stdin
-- **1** - stdout
-- **2** - stderr
-
-These come from the parent process. When you run `node app.js` from a shell, the shell's stdin/stdout/stderr get inherited. `console.log()` writes to fd 1. `process.stderr.write()` hits fd 2. They're file descriptors like any other - they just happen to be pre-allocated.
-
-Beyond those three, the kernel assigns the lowest available integer each time you open something. Open a file, get fd 3. Open another, fd 4. Close fd 3, open something else - you get 3 again, because it's free.
+That integer controls more state than its size suggests. `fs.readFile()`, `fs.createReadStream()`, `fs.writeFile()`, `fs.open()`, `FileHandle`, sockets, pipes, standard input, standard output. They all meet the operating system through an open resource recorded in kernel state.
 
 ```js
-const fs = require('fs');
-const fd1 = fs.openSync('/tmp/a.txt', 'w');
-const fd2 = fs.openSync('/tmp/b.txt', 'w');
-console.log(fd1, fd2);
-fs.closeSync(fd1);
-const fd3 = fs.openSync('/tmp/c.txt', 'w');
-console.log(fd3);
-fs.closeSync(fd2);
-fs.closeSync(fd3);
+const fs = require('node:fs');
+
+const fd = fs.openSync('/tmp/example.txt', 'w');
+console.log(fd);
+fs.closeSync(fd);
 ```
 
-The actual numbers you see won't be 3 and 4. Node opens internal file descriptors during startup - pipes for libuv's thread pool communication, the IPC channel if you forked, maybe a few others. Your first user-opened descriptor will typically be in the mid-teens (like 14 or 18). But the sequential, lowest-available allocation pattern holds.
+The printed value might be `17`, `22`, or something nearby. Node opens a few descriptors during startup, so user code rarely gets `3` in a real process. The number has meaning only inside that process. Another process can also have fd `17`, pointing at a different file, socket, pipe, or terminal.
 
-And it's worth being precise here: file descriptors cover more than just files. Sockets are file descriptors. Pipes are file descriptors. Even `/dev/null` and `/dev/urandom` get file descriptors when opened. The kernel treats them all the same way at the descriptor level - entries in a table pointing to kernel structures that know how to do I/O on that particular resource.
+## The Descriptor Table
 
-## How fs.open() Works Under the Hood
+A process starts with three descriptors already open.
 
-When you call `fs.open('/path/to/file', 'r', callback)`, several layers are involved.
+- `0` is standard input.
+- `1` is standard output.
+- `2` is standard error.
 
-Your JavaScript call hits Node's C++ binding layer. The binding constructs a `uv_fs_t` request struct and calls `uv_fs_open()` in libuv. Because file system operations are blocking at the kernel level (covered in Chapter 1), libuv dispatches the work to its thread pool. A thread pool worker executes the actual `open()` syscall - on Linux that's the POSIX `open()`, on macOS it's the same, on Windows libuv calls `CreateFileW()` and wraps the resulting `HANDLE` to look like a descriptor.
+The parent process sets those up before Node starts running your program. In a shell, fd `0` usually points at the terminal input, fd `1` at terminal output, and fd `2` at the same terminal through the error stream. In a service manager, container runtime, or pipeline, those descriptors may point at pipes, sockets, log collectors, or files.
 
-> [!NOTE]
-> A **syscall** (system call) is the programmatic way user space code requests a service from the kernel. It forces a context switch from user mode to kernel mode where elevated privileges apply.
+Node treats them as streams because Chapter 3 already covered streams. The lower layer still sees descriptors. `console.log()` eventually writes bytes to fd `1`. `process.stderr.write()` writes bytes to fd `2`.
 
-The kernel, upon receiving the `open()` syscall, does several things in sequence:
-
-1. Resolves the path component by component - traversing directories, checking each one exists
-2. Verifies the process has permission to open the file in the requested mode
-3. Locates the file's inode on disk - the kernel data structure that stores the file's metadata and block pointers
-4. Allocates an entry in the kernel's open file table, which tracks the current file offset (position), the access mode, and a reference to the inode
-5. Finds the lowest available slot in the process's file descriptor table and points it at that open file table entry
-6. Returns the slot number - the fd
-
-> [!NOTE]
-> An **inode** (index node) is a fundamental Unix data structure describing a file-system object entirely. **Block pointers** hold the exact physical disk addresses where the file's payload data resides.
-
-Back in libuv, the thread pool worker finishes and posts the result to the event loop (covered in Chapter 1). The loop picks it up, and Node's C++ layer calls your JavaScript callback with the fd as the second argument.
-
-The whole round trip: JS -> C++ bindings -> libuv -> thread pool -> kernel syscall -> back through libuv -> back to JS. For every single `fs.open()`.
-
-One thing to be clear about: the file descriptor is process-scoped. The integer 22 in your process and the integer 22 in another process refer to completely different entries. Even if both processes open the same file, they get independent descriptors with independent state - separate file offsets, separate flags. Closing fd 22 in one process has zero effect on the other.
-
-## File Flags
-
-The second argument to `fs.open()` determines how the file gets opened. These strings map directly to POSIX open flags - the constants the kernel actually uses.
-
-**'r'** - Read only. Maps to `O_RDONLY`. File must exist; if it doesn't, you get `ENOENT`.
-
-**'r+'** - Read and write. Maps to `O_RDWR`. File must exist. The offset starts at byte 0, so reads and writes begin at the file's start. Existing content stays intact.
-
-**'w'** - Write only, create or truncate. Maps to `O_WRONLY | O_CREAT | O_TRUNC`. If the file exists, it gets wiped to zero bytes immediately on open. If it doesn't exist, it's created.
-
-**'w+'** - Read and write, create or truncate. Same as 'w' but with `O_RDWR` instead of `O_WRONLY`. Existing content is destroyed.
-
-**'a'** - Append. Maps to `O_WRONLY | O_CREAT | O_APPEND`. Every write goes to the end of the file regardless of where you try to seek. Creates the file if missing.
-
-**'a+'** - Read and append. Reads can happen anywhere in the file, but writes always land at the end.
-
-**'wx'** - Write exclusive. Adds `O_EXCL` to the flags. The open fails with `EEXIST` if the file already exists. The check-and-create is atomic at the kernel level - there's no race window where another process could sneak in between checking and creating.
-
-> [!NOTE]
-> An **atomic** operation completes in a single, indivisible step. A **race condition** (or race window) occurs when system behavior depends on the unpredictable timing of multiple concurrent processes. Kernel-level atomicity outright prevents these timing dependencies.
->
-> Constants like `ENOENT` (Error NO ENTry), `EEXIST` (Error EXISTs), and `EBADF` (Error BAD File descriptor) map to standard POSIX error codes. The `O_` flags match C-level definitions in `<fcntl.h>`, driving exact bitwise OS behavior.
-
-The exclusive flag matters when you need to guarantee that two processes won't both think they successfully created the same file. Log rotation, lock files, temp file creation - anywhere a race condition between check-and-create would cause bugs.
-
-You can also pass numeric flag values directly using `fs.constants`:
+After those first three, the kernel assigns the lowest free descriptor number for each open operation. Close one, and the slot becomes reusable.
 
 ```js
-const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC;
-const fd = fs.openSync('/tmp/out.txt', flags);
+const fs = require('node:fs');
+
+const a = fs.openSync('/tmp/a.txt', 'w');
+const b = fs.openSync('/tmp/b.txt', 'w');
+fs.closeSync(a);
+const c = fs.openSync('/tmp/c.txt', 'w');
+console.log({ a, b, c });
+fs.closeSync(b);
+fs.closeSync(c);
 ```
 
-But the string versions are easier to read, and I've rarely seen the numeric form in production code outside of native addons.
+`c` often equals `a`, because closing `a` frees that descriptor-table slot. The exact values depend on descriptors Node already holds, but the reuse behavior comes from the OS.
 
-### Mode Bits
+The table entry points at an open file description in kernel memory. That open file description tracks the current offset, access mode, append behavior, status flags, and a reference to the underlying file object. The file object eventually points at an inode on POSIX filesystems. If the descriptor represents a socket or pipe, the target kernel object has socket or pipe state instead.
 
-When a file gets created (flags 'w', 'a', 'wx', or any variant that includes `O_CREAT`), the third argument to `fs.open()` sets the permission bits. It's an octal number.
+Same interface. Different kernel object.
 
-```js
-fs.openSync('/tmp/secret.txt', 'w', 0o600);
-```
+That is why a descriptor can refer to more than a regular file. TCP sockets consume descriptors. Unix domain sockets consume descriptors. Pipes consume descriptors. `/dev/null` consumes one after you open it. The descriptor table only records "fd N points at this open kernel object"; the object itself defines which operations make sense.
 
-`0o600` means: owner can read and write, nobody else can do anything. The three octal digits represent owner, group, and others. Each digit encodes read (4) + write (2) + execute (1). So `0o644` gives the owner read/write, and everyone else read-only.
+## Opening A File
 
-> [!NOTE]
-> An **octal number** is a base-8 numeral system (prefixed with `0o` in JS). Permissions map cleanly to octals because 3 bits (read, write, execute) perfectly represent values 0 through 7.
-
-If you omit the mode, Node defaults to `0o666`. But the actual on-disk permissions get modified by the process's umask - a bitmask the kernel subtracts from the requested mode. A typical umask of `0o022` turns `0o666` into `0o644`. So even without specifying mode, you usually end up with reasonable permissions.
-
-> [!NOTE]
-> A **bitmask** is a sequence of bits used for bitwise operations. A **umask** (user file-creation mode mask) dictates the default permissions newly created files should NOT have. The kernel clears the bits defined in the umask from the requested permissions.
-
-On Windows, mode bits have minimal effect. Windows uses ACLs for permissions, and Node does a best-effort mapping that's... approximate. If you're writing cross-platform code that needs specific permissions, you'll want to handle Windows separately.
-
-> [!NOTE]
-> **ACLs** (Access Control Lists) provide fine-grained permissions. Instead of Unix's broad owner/group/other breakdown, an ACL explicitly lists which individual Windows users or groups are granted or denied specific access rights.
-
-## The fd Lifecycle
-
-Open. Use. Close. That's it. But each stage has details that matter.
-
-**Open** allocates the kernel structures and returns a descriptor. The descriptor is valid from this point until close.
-
-**Use** means passing the fd to functions like `fs.read()`, `fs.write()`, `fs.fstat()`, `fs.fsync()`. Each call references the same kernel-side state - the same file offset, the same flags. If you `fs.read()` 100 bytes, the offset advances by 100, and the next read starts where the last one left off. Two different fd's opened on the same file maintain independent offsets.
-
-**Close** releases everything. `fs.close(fd, callback)` triggers the `close()` syscall. The kernel releases the open file table entry and marks the fd number as available for reuse. Data that was written may still sit in the kernel's buffer cache - `close()` does not guarantee a flush to disk. Use `fs.fsync()` before closing if you need that guarantee. After close, the integer is invalid. Using it in an `fs.read()` call produces `EBADF` - bad file descriptor.
-
-> [!NOTE]
-> The **buffer cache** (or OS page cache) is main memory the kernel uses to temporarily store disk block contents. Writes hit RAM first for speed and get flushed to physical storage asynchronously.
+`fs.open()` is the place where the JavaScript path turns into a descriptor.
 
 ```js
-fs.open('/tmp/data.bin', 'r', (err, fd) => {
-  if (err) throw err;
-  const buf = Buffer.alloc(64);
-  fs.read(fd, buf, 0, 64, 0, (err, bytesRead) => {
-    fs.close(fd, () => {});
-    if (err) throw err;
-    console.log(`Read ${bytesRead} bytes`);
+const fs = require('node:fs');
+
+fs.open('/tmp/data.txt', 'r', (err, fd) => {
+  if (err) return handleError(err);
+  console.log(fd);
+  fs.close(fd, (closeErr) => {
+    if (closeErr) handleError(closeErr);
   });
 });
 ```
 
-Notice the close happens inside the read callback, regardless of whether the read succeeded. That's the pattern. Close must happen in every code path. Forgetting it leaks the descriptor.
+The callback receives an fd because the open operation finished in native code. Node converted your path and flags, called into the C++ binding layer, created a libuv filesystem request, and handed the blocking work to libuv.
 
-### What Leaking Actually Means
+The kernel open path has a fixed shape. It resolves the path component by component. It checks permissions. It applies flags. It creates or finds the file object. It allocates an open file description. It installs a pointer to that description into the process descriptor table. Then it returns the descriptor number.
 
-When you open a file and don't close it, the fd stays allocated for the lifetime of your process. One leaked descriptor is usually harmless. A hundred, and you're wasting kernel memory. A thousand, and you're probably hitting the process limit.
+On Linux and macOS, the native call is `open()` or a close relative. On Windows, libuv calls `CreateFileW()` and maps the returned `HANDLE` into its file abstraction. Node's `fs` API covers most of that split, but a few Windows cases still show up around sharing modes, path length, and permission behavior.
 
-The kernel enforces a per-process cap on open file descriptors. Check yours:
+A descriptor is process-scoped. Two processes opening `/tmp/data.txt` get separate descriptor table entries and separate open file descriptions. Each open call has its own file offset. Read 100 bytes through one descriptor, and the offset for that open description advances by 100. A separate open call keeps its own offset.
+
+Duplicated descriptors behave differently. `dup()`, `fork()`, and descriptor inheritance can create multiple descriptor-table entries pointing at the same open file description. Those descriptors share the offset. If one reads 100 bytes, the next read through the other starts from the new position. Node keeps most application code away from raw `fork()` inheritance, but the OS behavior explains odd results when descriptors are passed between processes.
+
+## Flags Decide The Open State
+
+The second argument to `fs.open()` controls access mode and creation behavior. String flags map to OS-level bit flags.
+
+`'r'` opens for reading. The file must already exist. Missing path gives `ENOENT`.
+
+`'r+'` opens for reading and writing. The file must already exist. The offset starts at byte `0`.
+
+`'w'` opens for writing, creates the file when needed, and truncates existing content to zero bytes during open.
+
+`'w+'` opens for reading and writing with the same create-and-truncate behavior.
+
+`'a'` opens for appending, creates the file when needed, and makes each write land at the current end of the file.
+
+`'a+'` opens for reading and appending. Reads can use positions. Writes still append.
+
+`'wx'` opens for writing with exclusive creation. If the path already exists, the open fails with `EEXIST`. The check and creation happen inside the kernel operation, so two processes competing for the same path get one winner.
+
+```js
+let fd;
+try {
+  fd = fs.openSync('/tmp/lock.pid', 'wx', 0o600);
+  fs.writeSync(fd, `${process.pid}\n`);
+} catch (err) {
+  handleOpenError(err);
+} finally {
+  if (fd !== undefined) fs.closeSync(fd);
+}
+```
+
+That pattern is common for lock files and one-time creation. `handleOpenError()` can log `EEXIST` and rethrow everything else. The `finally` handles the fd. If `writeSync()` throws after the open succeeds, the descriptor still closes. The flag matters more than a separate existence check. `fs.existsSync()` followed by `fs.openSync(..., 'w')` has a race between the two calls. `O_EXCL` folds the decision into the open operation.
+
+Numeric flags exist too:
+
+```js
+const fs = require('node:fs');
+
+const flags = fs.constants.O_WRONLY |
+  fs.constants.O_CREAT |
+  fs.constants.O_TRUNC;
+const fd = fs.openSync('/tmp/out.txt', flags);
+fs.closeSync(fd);
+```
+
+String flags read better in application code. Numeric flags show up when you need a specific platform flag, when porting C logic, or when a native addon boundary already speaks in flag bits.
+
+## Creation Mode And `umask`
+
+The third `fs.open()` argument applies when the open call creates a file. It sets the requested permission bits.
+
+```js
+const fs = require('node:fs');
+
+const fd = fs.openSync('/tmp/secret.txt', 'w', 0o600);
+fs.closeSync(fd);
+```
+
+`0o600` gives the owner read and write permission. Group and others get permission value `0`. The three octal digits encode owner, group, and others. Inside each digit, read is `4`, write is `2`, and execute is `1`.
+
+Node's default creation mode is `0o666`, which means read and write for owner, group, and others before the process mask is applied. The process `umask` clears bits from that requested mode. A common `0o022` mask turns `0o666` into `0o644`: owner read/write, everyone else read-only.
+
+That last sentence causes real bugs. Passing `0o666` asks for broad permissions. The OS mask narrows the result. In deployment, the service manager, shell, container image, or init system may set a different mask than your development shell.
+
+Windows uses ACLs for actual permission decisions. Node maps POSIX-style modes onto Windows behavior where it can, but serious Windows permission control belongs in Windows-specific code.
+
+## Close Is Part Of The Operation
+
+Open. Use. Close.
+
+The lifecycle is small, and every part has state behind it. `open` allocates descriptor-table state and kernel open-file state. `read`, `write`, `fstat`, `fsync`, and related calls use that state. `close` releases the descriptor slot and decrements the kernel reference count for the open file description.
+
+```js
+fs.open('/tmp/data.bin', 'r', (err, fd) => {
+  if (err) return handleError(err);
+  fs.read(fd, Buffer.alloc(64), 0, 64, 0, (readErr, bytesRead) =>
+    fs.close(fd, (closeErr) => {
+      if (readErr) return handleError(readErr);
+      if (closeErr) return handleError(closeErr);
+      console.log(`read ${bytesRead} bytes`);
+    }));
+});
+```
+
+The read call uses an explicit position of `0`, so it reads from the beginning and leaves the descriptor's current offset alone. The close happens inside the callback because the descriptor remains open until the async operation completes. The callback shape gets ugly fast. That ugliness is the point: raw fd code needs an explicit close path, and close can fail too. Move `fs.close()` above `fs.read()`, and the read races against descriptor reuse or fails with `EBADF`.
+
+`close()` has one boundary worth remembering: it releases the descriptor. Written bytes may still sit in dirty pages in the page cache. Use `fs.fsync()` or `FileHandle.sync()` when crash durability matters, then close.
+
+Descriptor reuse creates nasty bugs after a bad close pattern. Suppose code closes fd `18`, then later another part of the process opens a socket and gets fd `18`. A stale async callback that still holds the old integer can now operate on the new socket. Node's higher-level APIs reduce that risk by owning descriptors internally, but raw fd code leaves the lifecycle in your code.
+
+## Leaks Become `EMFILE`
+
+A leaked descriptor stays allocated until the process exits or the handle is closed by some cleanup path.
+
+One leak barely moves the needle. A leak per request takes the service down. The OS enforces a per-process descriptor limit, and Node shares that budget across files, sockets, pipes, stdio, internal libuv descriptors, and active TCP connections.
+
+Check the shell limit:
 
 ```sh
 ulimit -n
 ```
 
-Common defaults: 1024 on Linux, 256 on older macOS (newer macOS often defaults higher). That count includes everything - stdin, stdout, stderr, sockets, pipes, internal libuv descriptors. A Node.js HTTP server uses one fd per active TCP connection. Add in log files, database connections, and your application code, and 1024 can feel tight.
+Common defaults range from a few hundred to many thousands. Containers and service managers can set lower or higher values than your interactive shell.
 
-## The EMFILE Error
-
-Hit the limit and `fs.open()` fails with `EMFILE`. The name comes from the errno constant - "Error: too Many FILES open" (the naming is old Unix whimsy). It's one of the more common production failures in Node applications.
-
-Here's what a leak looks like:
+When the process runs out, open operations fail with `EMFILE`.
 
 ```js
+const fs = require('node:fs');
+
 for (let i = 0; i < 2000; i++) {
   fs.open('/tmp/test.txt', 'r', (err, fd) => {
     if (err) return console.error(i, err.code);
-    // never closing fd
   });
 }
 ```
 
-Run that with a 1024 limit and you'll see `EMFILE` errors starting around iteration 1000, after Node's internal descriptors and stdin/stdout/stderr eat into the budget. Each successful open consumes a slot. With no closes, slots only go in one direction.
+Every successful open consumes a slot. The snippet leaks all of them. Eventually `fs.open()` starts returning `EMFILE`, usually before the loop reaches the configured limit because Node and the process already hold descriptors.
 
-But leaks in real code are subtler. Consider error paths:
+Real leaks often sit in error paths.
 
 ```js
 fs.open('/tmp/data.txt', 'r', (err, fd) => {
-  if (err) throw err;
-  doSomethingAsync(fd, (err) => {
-    if (err) throw err;  // fd never closed on this path
-    fs.close(fd, () => {});
+  if (err) return handleError(err);
+  doWork(fd, (workErr) => {
+    if (workErr) return handleError(workErr);
+    fs.close(fd, (closeErr) => {
+      if (closeErr) handleError(closeErr);
+    });
   });
 });
 ```
 
-If `doSomethingAsync` passes an error to its callback, we throw - and the fd leaks. Each occurrence burns one descriptor. In a server handling requests, these add up over hours or days until EMFILE hits and the whole thing goes down.
+If `doWork()` reports an error, the descriptor stays open. The error handler exits before the close call. In callback code, you need an explicit close path for success and failure.
 
-### Debugging Descriptor Leaks
+On Linux, `/proc/self/fd` gives the current process's open descriptor list:
 
-On Linux and macOS, `lsof` is the go-to tool:
+```js
+const fs = require('node:fs');
+
+const count = fs.readdirSync('/proc/self/fd').length;
+console.log('open descriptors:', count);
+```
+
+For an external view, use `lsof`:
 
 ```sh
 lsof -p $(pgrep -f 'node app.js')
 ```
 
-You'll see every open descriptor for your Node process: file paths, socket addresses, pipe endpoints. If you see hundreds of entries pointing to the same file, or descriptors that should've been closed still hanging around, that's your leak.
+That output shows descriptors, target paths, sockets, pipes, and deleted files still held open. A count that grows over time under steady traffic usually means a leak. Flat counts under load mean the process is opening and closing at a stable rate.
 
-You can also monitor the count programmatically. On Linux, `/proc/self/fd` is a directory listing all open descriptors for the current process:
-
-```js
-const fds = fs.readdirSync('/proc/self/fd');
-console.log('Open descriptors:', fds.length);
-```
-
-In production, tools like Prometheus exporters can track `process.open_fds` as a gauge metric. Set an alert threshold. If the count grows monotonically over time, something's leaking.
-
-### Raising the Limit
-
-For short-term relief, bump the soft limit:
+Raising the limit increases capacity:
 
 ```sh
 ulimit -n 65536
 ```
 
-That applies to your current shell session and processes spawned from it. The hard limit caps how high you can go - check with `ulimit -Hn`. Root can raise the hard limit via `/etc/security/limits.conf` on Linux.
+That change helps a server with many legitimate concurrent sockets. Leaking code still fails after more requests. Fix the close path, then size the limit for real concurrency.
 
-But raising the limit is a band-aid if your code leaks. Fix the leak first. Then tune the limit to match your actual concurrent connection count plus a comfortable margin.
+## `FileHandle` Is The Better Default
 
-## The FileHandle Abstraction
-
-Raw fd integers are error-prone. Forgetting `fs.close()` is easy, especially in async code with branching error paths. Node's `fs.promises` API provides a better model: the `FileHandle` object.
+Raw fd integers are easy to mishandle. `open()` from `node:fs/promises` wraps the descriptor in a `FileHandle`.
 
 ```js
-const fh = await require('fs').promises.open('/tmp/data.txt', 'r');
-console.log('fd:', fh.fd);
+import { open } from 'node:fs/promises';
+
+const fh = await open('/tmp/data.txt', 'r');
+console.log(fh.fd);
 await fh.close();
 ```
 
-`fs.promises.open()` returns a `FileHandle` instead of a raw integer. The `.fd` property gives you the underlying descriptor if you need it, but you typically don't - `FileHandle` has methods for everything: `.read()`, `.write()`, `.stat()`, `.readFile()`, `.writeFile()`, `.truncate()`, `.sync()`, `.close()`.
+The `.fd` property exposes the underlying descriptor, but most code should stay on the object. `FileHandle` has methods for `read()`, `write()`, `stat()`, `readFile()`, `writeFile()`, `truncate()`, `sync()`, and `close()`. The object carries the resource and the operations together.
 
-All of them return Promises. And because they're methods on the handle object, you don't pass the fd around to standalone functions. The resource and the operations on it are bundled together.
-
-### The try/finally Pattern
-
-The standard way to use `FileHandle`:
+Use `try` and `finally` when a handle spans more than one operation.
 
 ```js
-const fs = require('fs').promises;
-const fh = await fs.open('/tmp/data.txt', 'r');
+const fh = await open('/tmp/data.txt', 'r');
 try {
   const buf = Buffer.alloc(256);
-  const { bytesRead } = await fh.read(buf, 0, 256, 0);
-  console.log(`Got ${bytesRead} bytes`);
+  const result = await fh.read(buf, 0, 256, 0);
+  console.log(result.bytesRead);
 } finally {
   await fh.close();
 }
 ```
 
-The `finally` block runs whether the try block succeeds or throws. The descriptor gets closed either way. Compare this to the callback version where you need to remember `fs.close(fd, ...)` in every branch - the Promise version makes the cleanup path explicit and harder to mess up.
+`finally` runs on success and failure. The descriptor closes when parsing throws, when a read fails, or when later code returns early. That structure is the main reason `FileHandle` is the default choice for new code.
 
-### What Happens If You Forget to Close a FileHandle
-
-Node tracks `FileHandle` instances. If one gets garbage collected without `.close()` being called, Node closes the underlying fd and prints a warning:
-
-```
-(node:12345) Warning: Closing file descriptor 21 on garbage collection
-```
-
-This is a diagnostic safety net, and you should never rely on it. Garbage collection timing is unpredictable - V8 might not run a GC cycle for minutes, and during that time the descriptor is leaked. In a server processing requests, that's potentially hundreds of leaked descriptors before GC triggers.
-
-Future Node versions may turn this warning into a hard error. Close your handles.
-
-### `await using` - Automatic Resource Cleanup
-
-Node.js v24 supports the Explicit Resource Management proposal. `FileHandle` implements `Symbol.asyncDispose`, which means you can use `await using`:
+Node also supports explicit resource management in current releases. `FileHandle` implements `Symbol.asyncDispose`, so `await using` can close it at scope exit when your runtime and tooling accept the syntax.
 
 ```js
-const fs = require('fs').promises;
-await using fh = await fs.open('/tmp/data.txt', 'r');
-const content = await fh.readFile('utf8');
-console.log(content);
-// fh.close() called automatically when fh goes out of scope
+import { open } from 'node:fs/promises';
+
+{
+  await using fh = await open('/tmp/data.txt', 'r');
+  const text = await fh.readFile('utf8');
+  console.log(text.length);
+}
 ```
 
-The two `await` keywords serve different purposes. `await fs.open()` waits for the file to actually open. `await using` registers the variable for async disposal - when execution leaves the scope (end of block, exception, return, whatever), the runtime calls `fh[Symbol.asyncDispose]()`, which calls `fh.close()`.
+There are two waits here. `await open()` waits for the open operation. `await using` registers async disposal for the binding. ESM keeps top-level `await using` in the module context where readers usually see it. When execution leaves the block, Node calls the handle's async disposer, which closes the descriptor.
 
-No try/finally needed. No manual close call. The resource is tied to lexical scope, and the runtime handles cleanup. If you're on Node v20.4.0+ (where this was added to FileHandle) and your toolchain supports the syntax, prefer this pattern.
+Garbage collection is a diagnostic fallback. If a `FileHandle` becomes unreachable while still open, Node can close it and emit a warning. Treat that warning as a bug. GC timing is unrelated to descriptor pressure, traffic bursts, or your fd limit.
 
-###  When to Choose FileHandle vs Raw fd
+Raw descriptors still have a place. Legacy callback code uses them. Native addons may expect them. Some low-level APIs still speak in integers. For application code written with `async` and `await`, `FileHandle` is the clearer API.
 
-For new code, use `FileHandle` via `fs.promises`. The cleanup guarantees are worth the negligible overhead of wrapping an integer in an object. The `fs.promises` API deliberately omits functions that take raw fd arguments - there's no `fs.promises.read(fd, ...)`. The design pushes you toward the safer abstraction.
+## The libuv Path
 
-Use raw fd's when you need to interface with native addons expecting integer descriptors, or when you're maintaining legacy callback-based code where refactoring to Promises isn't practical. The callback-based `fs.open()` / `fs.close()` / `fs.read(fd, ...)` API still works and will continue to work.
+File I/O APIs expose async callbacks and promises. Regular file operations still run as blocking OS calls in the common Node path.
 
-Performance-wise, the difference is negligible. The I/O cost of actually reading or writing data dwarfs the cost of one extra JavaScript object. Profile before optimizing here.
+libuv exposes filesystem work through `uv_fs_*` functions: `uv_fs_open()`, `uv_fs_read()`, `uv_fs_write()`, `uv_fs_close()`, and the rest. Each async call uses a `uv_fs_t` request. Node's C++ binding fills that request with the path, fd, flags, mode, buffers, offsets, and callback state needed by the operation.
 
-## How File Operations Actually Execute
+For regular files, portable readiness-based async I/O has platform-specific constraints. Linux has `io_uring`, older Linux AIO exists with constraints, macOS readiness APIs fit sockets better than regular files, and Windows has overlapped I/O with different semantics. Node's stable path through libuv uses the worker pool for filesystem calls in normal operation. The default pool has four threads and is controlled by `UV_THREADPOOL_SIZE`.
 
-This is the part most documentation skips. When Node performs a file operation, the actual execution path goes through libuv's file system layer, and understanding that path explains behaviors you might otherwise find puzzling.
+The sequence for `fs.open('/tmp/x', 'r', cb)` is concrete.
 
-libuv exposes file operations through the `uv_fs_*` family of functions. `uv_fs_open()`, `uv_fs_read()`, `uv_fs_write()`, `uv_fs_close()` - each one takes a `uv_fs_t` request struct, a `uv_loop_t*` loop reference, and a callback.
+Node validates arguments in JavaScript. The C++ binding receives the call and creates an FS request object. libuv queues work to the thread pool. A worker thread calls the platform open primitive. The kernel resolves the path, checks permissions, allocates open-file state, and returns either an fd-shaped value or an error. The worker stores the result on the `uv_fs_t` request and posts completion back to the loop. On the main thread, Node reads the request result, builds the JavaScript callback arguments, and calls your callback.
 
-Here's the thing about file I/O on most operating systems: there is no true asynchronous API for regular files. Linux has `io_uring` (since kernel 5.1) and the older `aio` interface. Libuv actually *does* have built-in support for `io_uring` to perform async file operations without the thread pool, but as of Node v24, it is disabled by default due to performance regressions and past security vulnerabilities, falling back to the thread pool (though it can be toggled via environment variables). On macOS, `kqueue` works for sockets and pipes but provides unreliable notifications for regular files. Windows has overlapped I/O for files, but libuv's implementation uses its own thread pool there too.
+That means the event loop stays available while the worker thread blocks in the syscall. It also means the worker pool can become the bottleneck. Fire 500 concurrent `fs.open()` calls with the default pool, and four calls run while the rest wait in libuv's queue. The queue accepts the extra work. Latency rises.
 
-So libuv does the pragmatic thing: it offloads every file operation to its thread pool. The default pool size is 4 threads (controlled by `UV_THREADPOOL_SIZE`, max 1024). When you call `fs.open('/path', 'r', callback)`, the operation gets queued as a work item. One of the pool threads picks it up and issues the blocking `open()` syscall. When the syscall returns, the thread posts the result back to the event loop via a platform-specific notification mechanism - an `eventfd` on Linux, a pipe on macOS.
+The pool is shared. `dns.lookup()`, many crypto operations, compression work, and user code queued through libuv compete with filesystem operations. Increasing `UV_THREADPOOL_SIZE` can help file-heavy workloads, but it increases native thread count and can add scheduling overhead. Measure the workload. Blindly setting it to a large number often moves the wait from libuv's queue to the kernel scheduler or storage device.
 
-The event loop (covered in Chapter 1) picks up the notification in its poll phase and fires your JavaScript callback.
+The kernel has another layer of state after the worker reaches `open()`. On Linux, the process has a descriptor table. Entries in that table point at open file descriptions. Open file descriptions point at inodes or other kernel objects. Multiple descriptors can point at one open file description after duplication or inheritance. Multiple open file descriptions can point at the same inode after independent opens.
 
-The `uv_fs_t` struct holds everything the thread pool worker needs: the path, the flags, the mode, and space for the result (the fd or an error code). After the operation completes, the struct also holds timing information and the OS error if one occurred. Node's C++ binding reads these fields and constructs the JavaScript arguments for your callback.
+That distinction explains offset behavior. Two independent calls to `fs.open('/tmp/log', 'r')` produce separate open file descriptions. Their offsets move independently. A duplicated descriptor shares the same open file description. Its offset moves with the original. Append mode adds another rule: with `O_APPEND`, the kernel positions each write at end-of-file as part of the write operation.
 
-One implication: every outstanding file operation consumes a thread pool slot. With the default pool of 4, if you fire off 100 concurrent `fs.open()` calls, 4 execute at once and 96 queue up. The queue is unbounded, so you won't get errors - but throughput plateaus at 4 concurrent syscalls. Bump `UV_THREADPOOL_SIZE` if file I/O throughput matters, but remember the pool is shared with DNS lookups (`dns.lookup()`), crypto operations, and any other work offloaded via `uv_queue_work()`.
+`close()` unwinds references. The descriptor-table slot is freed. The open file description reference count drops. When the last descriptor pointing at that open file description closes, the kernel releases it. If the directory entry has already been removed, POSIX keeps the file data alive until that last close. That is why disk space may stay used after `rm` when a process still has the file open.
 
-The kernel side has its own structure for tracking open files. On Linux, there are three tables involved:
+Node spawned children get a controlled view of descriptors. libuv opens file descriptors with close-on-exec where appropriate, and Node's `child_process` APIs pass only the stdio descriptors and any entries explicitly configured through `stdio`. That behavior keeps random application files from leaking into child programs.
 
-1. **The per-process file descriptor table** - maps fd integers (0, 1, 2, ...) to entries in the open file table. One per process.
-2. **The system-wide open file table** - each entry tracks the current offset (position within the file), the access mode (read/write/append), and a pointer to the inode. Shared across the system.
-3. **The inode table** - each entry represents a file on disk. Tracks metadata (permissions, size, timestamps) and the locations of data blocks. Multiple open file entries can point to the same inode - that's what happens when the same file is opened multiple times.
+Sync APIs take a shorter native path. `fs.openSync()` calls the filesystem operation on the main JavaScript thread and blocks until the OS returns. The call can be cheap when metadata is hot in cache. It can stall the whole process when storage is slow, remote, busy, or waiting on permissions infrastructure. Use sync file calls during startup, CLIs, and scripts where blocking the event loop has zero request traffic cost.
 
-When `fork()` creates a child process, the child gets a copy of the parent's fd table. Both parent and child now have entries pointing to the same open file table entries. That means they share the file offset. If the parent reads 100 bytes, advancing the offset, the child's next read starts at byte 100 too. This shared-offset behavior is specific to forked processes sharing descriptors - two independent `open()` calls on the same file create separate open file table entries with independent offsets.
+## Cross-Platform Cases
 
-Node's `child_process.fork()` sets up IPC channels using socketpair file descriptors. But importantly, **libuv opens all files with the `O_CLOEXEC` (Close-on-exec) flag by default**. While a raw POSIX `fork()` duplicates the entire fd table, when you spawn a child process in Node, any regular files you previously opened via `fs.open()` are automatically closed for the child. The child only inherits `stdin`, `stdout`, `stderr` (fds 0, 1, 2) and the `ipc` channel, unless you explicitly pass other descriptors through the `stdio` array.
+Most descriptor code stays portable when you use Node APIs and `node:path`. A few platform cases still matter.
 
-> [!NOTE]
-> A **socketpair** is a connected pair of unnamed sockets used for two-way communication. An **IPC channel** (Inter-Process Communication) abstracts this pair so Node parent and child processes can pass messages natively. `O_CLOEXEC` ensures descriptors aren't accidentally leaked into spawned child programs.
+Path separators differ. Use `path.join()` and `path.resolve()` for separator handling.
 
-The `close()` syscall does more than mark a slot as free. It decrements the reference count on the open file table entry. If the reference count hits zero (no more descriptors pointing to it from any process), the entry is freed. The inode's reference count gets decremented too, and if it reaches zero and the link count (from hard links) is also zero, the file's data blocks are actually released. That's why you can delete a file while another process has it open - the name disappears from the directory, but the data stays until the last fd closes.
+Case behavior differs. Linux filesystems are usually case-sensitive. Windows and default macOS filesystems usually treat `File.txt` and `file.txt` as the same path. Tests that pass on one platform can create name collisions on another.
 
-> [!NOTE]
-> **Hard links** are multiple independent directory entries mapped to the identical inode. The kernel tracks this via a link count. Subjacent data blocks are strictly wiped only when both descriptor and link counts reach zero.
+Permission bits differ. POSIX modes and `umask` map cleanly on Unix-family systems. Windows ACLs carry the real permission model.
 
-libuv also provides synchronous versions of every file operation - `uv_fs_open()` can be called without a callback, blocking the calling thread until the syscall completes. Node uses these for the `*Sync` variants (`fs.openSync()`, `fs.readSync()`, etc.). When you call `fs.openSync()`, it skips the thread pool entirely and blocks the main JavaScript thread on the syscall. Fast if the file is in the OS page cache, potentially slow if it requires disk access. Avoid in server code.
+File locking differs. POSIX locks are commonly advisory. Windows sharing modes can prevent other opens. Node core exposes limited locking support, so applications that need lock files usually use a package built for that job and test it on the target OS.
 
-## Cross-Platform Behavior
+Path length differs. Modern Windows APIs can handle long paths with the right prefixes and process settings, while old assumptions around `MAX_PATH` still surface in tools. POSIX path limits are byte-based and vary by filesystem.
 
-Node abstracts over platform differences through libuv, and most of the time you won't notice. But some edges leak through.
+## Production Habits
 
-**Path separators.** Windows uses `\`, POSIX uses `/`. Node's `path` module handles this - `path.join('dir', 'file.txt')` produces the right separator for your platform. Pass paths through `path.join()` or `path.resolve()` instead of concatenating strings with `/`.
+Prefer APIs that own descriptors internally. `readFile`, `writeFile`, `appendFile`, `createReadStream`, and `createWriteStream` open and close for you. Reach for `fs.open()` or `FileHandle` when you need repeated operations against one descriptor, random access, explicit durability calls, or integration with code that already expects an fd.
 
-**Case sensitivity.** NTFS (Windows) and APFS (macOS) are case-insensitive by default. `File.txt` and `file.txt` are the same file. ext4 (Linux) is case-sensitive. Code that works on Linux might fail on Windows or macOS if it depends on case-distinct filenames.
-
-> [!NOTE]
-> **NTFS** (New Technology File System), **APFS** (Apple File System), and **ext4** (Fourth Extended File System) dictate exactly how paths are stored, indexed, and retrieved at the lowest OS level.
-
-**Descriptor vs handle.** On Windows, `CreateFileW()` returns an opaque `HANDLE`, a pointer-sized value. libuv converts it into something that looks like a POSIX fd to your JavaScript code. The conversion is internal - you see an integer and use it the same way.
-
-**File locking.** POSIX has advisory locks via `flock()` and `fcntl()`. "Advisory" means they only work if all processes cooperate by checking locks before accessing the file. Windows has mandatory locks - opening a file with exclusive access prevents other processes from opening it at all. Node's `fs` module doesn't expose locking directly. If you need cross-platform file locking, use a package like `proper-lockfile`.
-
-> [!NOTE]
-> **Advisory locks** require explicit opt-in from all processes; the kernel won't stop rogue writes. **Mandatory locks** are strictly enforced by the kernel on every single read/write call, refusing access regardless of whether the caller checked the lock.
-
-**Path length.** Windows historically limits paths to 260 characters (`MAX_PATH`). The Unicode APIs support up to 32,767 characters with the `\\?\` prefix, and Node tries to use those, but edge cases remain. POSIX limits are typically 4096 bytes - rarely a problem.
-
-## Patterns for Resource Management
-
-A few patterns that prevent descriptor leaks in production code.
-
-**Limit concurrency.** If you're processing 10,000 files, don't open all of them at once. Use a concurrency limiter:
+Limit fan-out. Processing 50,000 files can still use a small active descriptor set.
 
 ```js
 const pLimit = require('p-limit');
 const limit = pLimit(50);
-const tasks = paths.map(p => limit(() => processFile(p)));
-await Promise.all(tasks);
+
+const jobs = paths.map((path) => limit(() => processFile(path)));
+await Promise.all(jobs);
 ```
 
-50 concurrent opens, max. The rest queue up. Same concept as backpressure (covered in Chapter 3) - controlling resource consumption rate to prevent exhaustion.
+That keeps at most 50 file operations active through your code path. The exact number depends on descriptor limits, storage latency, thread-pool pressure, and the rest of the process.
 
-**Use high-level APIs when you can.** `fs.readFile()`, `fs.writeFile()`, `fs.createReadStream()` - these open and close descriptors internally. You don't touch the fd, so you can't forget to close it. Reserve `fs.open()` for when you actually need low-level control: random access reads, keeping a file open across multiple operations, interfacing with native code.
+Track open descriptors in production. On Linux, export `/proc/self/fd` count as a gauge. Watch it beside request rate and active sockets. A rising descriptor count during flat traffic is a leak signal.
 
-**Monitor in production.** Track open fd count as a metric. On Linux, `fs.readdirSync('/proc/self/fd').length` gives you the count. Export it to your monitoring system. Set alerts. A monotonically increasing fd count over time means a leak.
+Close in `finally`. Use `await using` where your toolchain supports it. Keep raw fd integers contained to the smallest scope that needs them.
 
-**Close in finally.** Always. Whether you're using callbacks or Promises, the close must happen on every code path, including error paths. With `FileHandle` and `await using`, the runtime handles this for you.
-
-The underlying principle: file descriptors are a finite pool. The kernel enforces hard limits. Your code should treat them as a resource to acquire, use briefly, and release promptly - the same discipline you'd apply to database connections or mutex locks.
-
-> [!NOTE]
-> A **mutex lock** (mutual exclusion object) is a synchronization primitive used to prevent concurrent execution of critical sections of code by multiple threads. You lock it before proceeding, do your work, and then unlock it.
+Descriptors are finite process resources. Node gives you high-level APIs that own most of the lifecycle, but the kernel still accounts for every open file, socket, and pipe. When the count hits the limit, the next open fails. The fix is usually boring: fewer concurrent opens, tighter cleanup, and metrics that show the count before `EMFILE` becomes the first alert.

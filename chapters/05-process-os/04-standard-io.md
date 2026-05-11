@@ -11,30 +11,32 @@ published: true
 toc: true
 ---
 
-Every process on a Unix system inherits three open file descriptors. fd 0 is standard input. fd 1 is standard output. fd 2 is standard error. Node wraps these in stream objects - `process.stdin`, `process.stdout`, `process.stderr` - and the behavior of those wrappers depends on what's connected on the other end. A terminal, a pipe, a file. Each one changes the semantics in ways that catch people off guard.
+Every Unix process starts with three open file descriptors. fd 0 is standard input. fd 1 is standard output. fd 2 is standard error. Node puts stream objects on top of them: `process.stdin`, `process.stdout`, and `process.stderr`. Same property names every time. Different backing handle depending on what the shell connected before Node started.
 
-The annoying part: these three streams look normal. They have `.write()`, `.on('data')`, `.pipe()`. They quack like regular streams. But under the surface, they can be synchronous or asynchronous, blocking or buffered, depending on runtime conditions your code can't control. That's the whole story of standard I/O in Node - the interface is uniform, but the plumbing underneath isn't.
+The annoying part sits under the familiar API. `.write()`, `.on('data')`, and `.pipe()` look ordinary. Then Node switches between synchronous writes, async writes, buffering, terminal mode, file mode, and pipe mode based on fd state that your script inherited. The code path is already chosen before your first import runs.
 
 ## The three streams
 
-`process.stdin` is a Readable stream (covered in Chapter 3). `process.stdout` and `process.stderr` are Writable streams. They correspond directly to the three file descriptors (covered in Chapter 4) that every Unix process opens at birth.
+`process.stdin` is a Readable stream (covered in Chapter 3). `process.stdout` and `process.stderr` are Writable streams. They map to the standard file descriptors (covered in Chapter 4) that the parent process passes into Node.
 
-But they're special. Unlike a Readable you create with `fs.createReadStream()` or a Writable from `net.Socket`, these three have platform-dependent behavior baked in. They can be synchronous or asynchronous. They can block or buffer. And they can silently lose data on process exit, depending on what they're hooked up to.
+Standard I/O streams carry extra runtime rules. A Readable from `fs.createReadStream()` follows file stream behavior. A socket Writable follows socket behavior. The standard streams inspect fd 0, fd 1, and fd 2, then pick TTY, pipe, or file handling. They can block. They can buffer. They can also lose buffered data when `process.exit()` cuts the process off.
 
 ```js
 process.stdout.write('hello');
 process.stderr.write('debug info');
 ```
 
-Both calls look identical. Both write a string to a Writable stream. The difference: stdout carries program output, stderr carries diagnostic output. When someone pipes your program's output into another program (`node app.js | grep foo`), only stdout goes through the pipe. stderr still prints to the terminal. That separation is the whole reason stderr exists - Unix invented it in the 1970s specifically so error messages wouldn't corrupt data flowing through a pipeline.
+Both calls write a string to a Writable stream. stdout carries program data. stderr carries diagnostics. When someone runs `node app.js | grep foo`, the pipe receives stdout only. stderr still goes to the terminal unless the shell redirects fd 2 too. That split keeps machine-readable output separate from warnings, stack traces, progress lines, and debug noise.
 
-You can also construct your own Console instances that write to different streams entirely. More on that later.
+The split also explains a lot of CLI etiquette. A command that prints JSON should put only JSON on stdout. Timing information, skipped-file messages, parse warnings, and progress bars belong on stderr. That way a caller can do `node tool.js > data.json` and receive a clean file. The terminal still shows diagnostics because fd 2 stayed connected to the terminal.
+
+Custom `Console` instances can write somewhere else entirely. We'll come back to that after the stream mechanics are on the table.
 
 ## process.stdin
 
-`process.stdin` starts in paused mode (covered in Chapter 3). Nothing happens until you attach a listener or pipe it somewhere. Once you start reading, the process stays alive - stdin holds a reference on the event loop (covered in Chapter 1).
+`process.stdin` starts in paused mode (covered in Chapter 3). Nothing flows until code attaches a listener, resumes the stream, or pipes it somewhere. Once reading starts, stdin holds a ref on the event loop (covered in Chapter 1), so the process stays alive while input is active.
 
-Reading input, the simplest version:
+The smallest version looks boring:
 
 ```js
 process.stdin.on('data', (chunk) => {
@@ -42,9 +44,11 @@ process.stdin.on('data', (chunk) => {
 });
 ```
 
-The `data` event fires with Buffer chunks. If stdin is connected to a terminal, you'll get one chunk per line - the user types, hits Enter, and the line (including the newline character) arrives as a single chunk. If stdin is piped (`echo "hello" | node script.js`), you might get everything in one chunk, or it might arrive in pieces. Stream chunking behavior is never guaranteed.
+The `data` event delivers Buffer chunks. Terminal input usually arrives one line at a time because the terminal driver buffers input until Enter. Piped input has looser boundaries. `echo "hello" | node script.js` might produce one chunk, and a larger producer might produce many. Chunk boundaries are an implementation detail, so parser code has to treat them as arbitrary byte ranges.
 
-The async iterator form works too:
+That last sentence is the one that prevents bugs. A JSONL parser cannot assume one chunk equals one line. A protocol parser cannot assume one chunk equals one message. stdin is still a stream, so the usual stream rule applies: accumulate until you have a complete unit, then parse that unit.
+
+The async iterator form uses the same stream underneath:
 
 ```js
 for await (const chunk of process.stdin) {
@@ -52,13 +56,13 @@ for await (const chunk of process.stdin) {
 }
 ```
 
-Same behavior, cleaner syntax. The loop ends when stdin closes - when the user presses Ctrl+D (Unix) or Ctrl+Z (Windows), or when the piped input source runs out.
+Less wiring. Same bytes. The loop finishes when stdin ends: Ctrl+D on Unix, Ctrl+Z on Windows, or EOF from a piped source.
 
-One thing to note about the Buffer chunks: they are raw binary data by default. The `chunk.toString()` call gives you a string because `toString()` defaults to the `utf8` encoding. But if someone pipes binary data into your program, you'll want to work with the raw Buffer. You can set the encoding explicitly with `process.stdin.setEncoding('utf8')` to get strings directly from data events, or leave it as Buffers for binary processing.
+Buffers are raw bytes by default. `chunk.toString()` gives you text because `Buffer.prototype.toString()` defaults to `utf8`. Binary tools should keep the Buffer. Text tools can call `process.stdin.setEncoding('utf8')`, which makes `data` events deliver strings directly.
 
 ### Line-by-line with readline
 
-For interactive CLI tools, you usually want lines, not raw chunks. The readline module (covered in Chapter 4) handles that:
+Interactive CLI tools usually want complete lines, not raw chunks. The readline module (covered in Chapter 4) does the buffering:
 
 ```js
 import { createInterface } from 'node:readline';
@@ -68,9 +72,9 @@ rl.on('line', (line) => {
 });
 ```
 
-The readline interface buffers incoming data and splits on newline characters (`\n` or `\r\n`). It also handles terminal niceties - arrow keys, backspace, history navigation with up/down keys. But only when stdin is a TTY. When piped, readline just splits on newlines and moves on. No line editing, no history, no tab completion. Those features come from the terminal's line discipline, and a pipe doesn't have one.
+The interface buffers bytes, decodes text, and splits on newline boundaries (`\n` or `\r\n`). With a TTY, it also cooperates with terminal editing behavior: backspace, arrow keys, and history navigation. With a pipe, it just splits input into lines. A pipe carries bytes. The terminal line discipline supplies editing behavior.
 
-There's a promise-based variant too:
+There's a promise API too:
 
 ```js
 import { createInterface } from 'node:readline/promises';
@@ -80,11 +84,11 @@ console.log(`Hello, ${answer}`);
 rl.close();
 ```
 
-`rl.question()` writes the prompt to stdout, waits for a line of input, and resolves with the string. The `rl.close()` call is necessary - without it, the readline interface keeps a ref on stdin and the process won't exit.
+`rl.question()` writes the prompt to stdout, waits for one line, and resolves with the string. `rl.close()` releases the readline interface's ref on stdin, which lets the process exit once other work has finished.
 
 ### Raw mode
 
-When stdin is connected to a terminal, you can switch it to raw mode:
+TTY stdin can switch into raw mode:
 
 ```js
 process.stdin.setRawMode(true);
@@ -95,43 +99,41 @@ process.stdin.on('data', (key) => {
 });
 ```
 
-In raw mode, every keystroke fires immediately as a data event. No line buffering. No echo (characters don't appear on screen unless you write them yourself). The terminal hands you raw bytes. Ctrl+C doesn't trigger SIGINT anymore - you get the byte `0x03` and you have to handle it yourself. Password prompts, interactive menus, text editors - anything that needs character-by-character input uses raw mode.
+Raw mode delivers keystrokes immediately. The terminal stops line buffering. Your program receives bytes and decides whether to echo anything back. Ctrl+C arrives as `0x03` instead of becoming SIGINT, so the handler owns that behavior. Password prompts, menu UIs, REPL controls, and editor-style input all depend on this mode.
 
-`setRawMode()` only works when `process.stdin.isTTY` is true. Calling it on a piped stdin throws an error.
+`setRawMode()` requires `process.stdin.isTTY === true`. A piped stdin has no terminal mode to change, so calling it throws.
 
-Multi-byte keys come through as multi-byte buffers. An arrow key press, for instance, sends the escape sequence `\x1b[A` (up), `\x1b[B` (down), `\x1b[C` (right), `\x1b[D` (left). You get a 3-byte Buffer. Parsing these escape sequences is the job of libraries like `keypress` or the readline module's internal key parser. If you're building something that needs to handle arrow keys in raw mode, you'll need to decode ANSI escape sequences yourself or use a library that does.
+Multi-byte keys arrive as multi-byte buffers. The up arrow sends `\x1b[A`; down sends `\x1b[B`; right sends `\x1b[C`; left sends `\x1b[D`. Your code receives a 3-byte Buffer. Libraries such as `keypress` and readline's internal key parser decode those ANSI escape sequences. Raw-mode tools that handle arrows need that parser somewhere.
 
-### Keeping the process alive (and not)
+Raw mode also changes terminal cleanup requirements. If your program enables raw mode and then crashes before restoring the original mode, the user's terminal can stay in a strange state: no line buffering, no visible echo, Ctrl+C delivered as a byte. Well-behaved terminal programs restore cooked mode in `finally` blocks and signal handlers. Node restores the original TTY mode during normal shutdown, but code that calls `process.exit()` from random places can still make cleanup harder to reason about.
 
-stdin has a ref on the event loop. If you attach a `data` listener and do nothing else, the process won't exit. That's usually what you want for interactive programs. But sometimes you set up stdin reading as an optional feature - maybe you listen for Ctrl+C or certain keypresses, but the program should exit when its main work is done regardless.
+stdin has a ref on the event loop. Attach a `data` listener and the process stays open. That's correct for interactive programs. Some tools only want optional keyboard input while the main job runs, and those tools should let the process exit when the main job finishes.
 
 ```js
 process.stdin.resume();
 process.stdin.unref();
 ```
 
-After `unref()` (covered in Chapter 1), stdin's listener won't keep the event loop alive. The process will exit when all other ref'd work finishes, even though stdin is technically still listening. You can call `process.stdin.ref()` to re-ref it later if conditions change.
+After `unref()` (covered in Chapter 1), stdin still listens, but it stops keeping the event loop alive. The process exits when all other ref'd work finishes. You can call `process.stdin.ref()` later if an interactive prompt becomes active.
 
-A common pattern in dev tools: start with stdin unref'd, then ref it when the user activates an interactive debugging prompt. The tool can exit normally during non-interactive use, but stays alive for input when the user asks for a REPL.
+Dev tools use this pattern a lot. Start with stdin unref'd. Ref it when the user enters an interactive debugging prompt. Non-interactive runs exit normally.
 
 ## process.stdout
 
 `process.stdout` is a Writable stream. `console.log()` writes to it. So does `process.stdout.write()`.
-
-The difference between the two:
 
 ```js
 console.log('hello');            // writes "hello\n"
 process.stdout.write('hello');   // writes "hello" (no newline)
 ```
 
-`console.log()` calls `util.format()` on its arguments, appends a newline, and writes the result to `process.stdout`. It's a convenience wrapper. `process.stdout.write()` is the raw write call - you control exactly what bytes go out. Most of the time you want `console.log()`. But when you're writing progress bars, drawing terminal UI, or building output without trailing newlines (like a prompt), `process.stdout.write()` is the right call.
+`console.log()` calls `util.format()` on its arguments, appends a newline, and writes the formatted string to `process.stdout`. `process.stdout.write()` writes the bytes you pass. For prompts, progress bars, terminal UI, and output that needs exact newline control, use the direct stream call.
 
-`util.format()` does more than you might expect. `console.log('count: %d', 42)` uses printf-style formatting. `console.log({ a: 1 })` calls `util.inspect()` on the object. `console.log('a', 'b', 'c')` joins arguments with spaces. All of that is `util.format()`'s job, and it runs synchronously before the write happens.
+`util.format()` does real work before the write. `console.log('count: %d', 42)` handles printf-style placeholders. `console.log({ a: 1 })` calls `util.inspect()`. `console.log('a', 'b', 'c')` joins arguments with spaces. All of that runs synchronously before stdout sees a chunk.
 
-### The return value of write()
+The formatting step matters in hot paths. A disabled debug line that still calls `console.log(obj)` pays inspection cost before stdout sees anything. For command-line tools that print a few dozen lines, nobody cares. For tight loops, logging cost is often formatting plus terminal I/O, not just the `write()` syscall.
 
-Like any Writable stream, `process.stdout.write()` returns a boolean. `true` means the internal buffer is below the highWaterMark (covered in Chapter 3). `false` means the buffer is full - you should wait for the `drain` event (covered in Chapter 3) before writing more.
+Writable streams return a boolean from `write()`, and stdout follows that contract. `true` means the internal buffer remains below the highWaterMark (covered in Chapter 3). `false` means the buffer crossed the threshold, so more writes should wait for `drain` (covered in Chapter 3).
 
 ```js
 const ok = process.stdout.write(bigChunk);
@@ -142,20 +144,24 @@ if (!ok) {
 }
 ```
 
-In practice, most programs ignore the return value of stdout writes. For interactive output - a few log lines, some status messages - backpressure on stdout rarely matters. But if you're writing a program that dumps megabytes to stdout (a JSON formatter, a CSV exporter, a log processor), ignoring backpressure will balloon your memory. The internal buffer grows without bound until the consumer catches up or you run out of heap space.
+Most CLI output ignores the return value. A few log lines or status messages rarely build enough pressure to matter. A formatter that dumps megabytes to stdout is different. If the consumer reads slowly and your code keeps writing, Node's internal buffer grows until the consumer catches up or the heap gives out.
 
-The highWaterMark for stdout defaults to 16KB when connected to a pipe. For a TTY, it doesn't matter because writes are synchronous and the buffer is always empty after each write.
+For pipe-backed stdout, the default highWaterMark is 16KB. For TTY-backed stdout on Unix, synchronous writes leave no pending stream buffer after each call, so the threshold rarely enters the picture.
+
+Backpressure shows up quickly in pipelines. `node dump.js | gzip > out.gz` can make stdout wait on compression. `node dump.js | head -10` can close the pipe early. `node dump.js > /mnt/slow/out.txt` can block on filesystem latency. Different target. Same `process.stdout.write()` call.
+
+The return value is also the only signal your loop gets before memory starts growing. A tight producer that ignores `false` can enqueue thousands of chunks while the downstream process is still reading the first few. Node will accept those chunks into the Writable buffer until normal heap pressure catches up with you. Respecting `false` turns the loop into a paced producer instead of a heap growth test.
 
 ### Terminal dimensions
 
-When stdout is connected to a terminal:
+TTY stdout exposes terminal size:
 
 ```js
 console.log(process.stdout.columns); // e.g., 120
 console.log(process.stdout.rows);    // e.g., 40
 ```
 
-These give you the terminal's width and height in characters. They update when the user resizes the terminal window, and stdout emits a `resize` event:
+Those properties report width and height in character cells. They update when the terminal window changes size, and stdout emits `resize`:
 
 ```js
 process.stdout.on('resize', () => {
@@ -163,13 +169,13 @@ process.stdout.on('resize', () => {
 });
 ```
 
-When stdout isn't a TTY - when it's piped or redirected to a file - `columns` and `rows` are `undefined`. Programs that draw progress bars or format tables use these values, falling back to a default width (usually 80) when piped.
+Piped stdout and file-redirected stdout have `columns` and `rows` as `undefined`. Terminal UIs, progress bars, and table formatters usually fall back to 80 columns in that case.
 
-The `resize` event fires every time the terminal dimensions change. If you're redrawing a full-screen terminal UI (think `top` or `htop`), you'd listen for this event and re-render. The event comes from libuv's `uv_tty_t` handle, which registers a SIGWINCH signal handler internally. When the terminal emulator notifies the process of a size change via SIGWINCH, libuv captures it and emits the event on the JavaScript side.
+The `resize` event comes from libuv's TTY handle. On Unix, the terminal sends SIGWINCH when its dimensions change. libuv tracks that signal, asks the terminal for the current size with `ioctl(fd, TIOCGWINSZ, &winsize)`, then reflects the result through the JavaScript stream.
 
 ### ANSI cursor control
 
-Since stdout connected to a TTY is just a terminal device, you can write ANSI escape sequences to control the cursor:
+TTY stdout accepts ANSI escape sequences:
 
 ```js
 process.stdout.write('\x1b[2J');   // clear screen
@@ -177,9 +183,9 @@ process.stdout.write('\x1b[H');    // move cursor to top-left
 process.stdout.write('\x1b[5;10H'); // move to row 5, col 10
 ```
 
-These are the same escape codes that C programs use with `printf`. Node has no special cursor API - you just write the raw bytes. Libraries like `ansi-escapes` or `chalk` wrap these sequences in convenient functions, but underneath, it's always `stdout.write()` with escape codes.
+Cursor control is just bytes written to stdout. Packages such as `ansi-escapes`, `chalk`, and `kleur` wrap those byte sequences, but the final operation is still a write to fd 1.
 
-For clearing a line and redrawing (useful for progress bars):
+Progress output often clears and redraws one line:
 
 ```js
 process.stdout.write('\r');         // carriage return (start of line)
@@ -188,24 +194,26 @@ process.stdout.cursorTo(0);         // move cursor to column 0
 process.stdout.write('Progress: 42%');
 ```
 
-`clearLine()` and `cursorTo()` are methods available only on TTY streams. They write the appropriate ANSI sequences internally. Calling them on a piped stdout throws.
+`clearLine()` and `cursorTo()` exist on TTY streams. They write ANSI sequences internally. Piped stdout lacks those methods, so code that draws terminal UI needs an `isTTY` branch.
+
+That branch should also change the output format. Interactive output can redraw one line. Piped output should usually append plain records. A progress bar that writes carriage returns into a log file creates unreadable bytes. A CLI that switches to newline-delimited status records when stdout is piped behaves better under shells, CI logs, and test snapshots.
 
 ## process.stderr
 
-`process.stderr` is also a Writable stream. `console.error()`, `console.warn()`, `console.trace()`, and `console.dir()` all write to stderr. `console.log()`, `console.info()`, `console.table()`, and `console.count()` write to stdout.
+`process.stderr` is also a Writable stream. `console.error()`, `console.warn()`, `console.trace()`, and `console.dir()` write there. `console.log()`, `console.info()`, `console.table()`, and `console.count()` write to stdout.
 
-That split matters. When you run `node app.js | grep pattern`, grep only sees stdout. Error messages, warnings, stack traces - all of that goes to stderr and shows up in the terminal even though stdout is being piped.
+That split matters in pipelines. `node app.js | grep pattern` gives grep fd 1 only. Warnings, stack traces, progress lines, and debug output on fd 2 still appear in the terminal unless redirected.
 
 ```js
 console.log('data output');   // goes to pipe -> grep
 console.error('debug info');  // goes to terminal
 ```
 
-stderr is the right place for anything that isn't your program's actual output. Log messages, progress indicators, debug traces, error details. If someone might pipe your program into another program, keep diagnostic output on stderr. A lot of Node developers put everything on `console.log()` and wonder why their piped output is full of debug noise. The fix is simple: `console.error()` for diagnostics, `console.log()` for data.
+stderr is where diagnostics belong. stdout is where program data belongs. Plenty of Node scripts start with `console.log()` for everything and later become hard to pipe because debug output contaminates the data stream. The small fix is consistent: `console.error()` for diagnostics, `console.log()` for data.
 
-### Separate redirection
+stderr is also the right stream for progress. A downloader can stream file bytes to stdout while progress goes to stderr. A formatter can write transformed JSON to stdout while parse warnings go to stderr. The caller can redirect them independently without asking the program for a custom flag.
 
-The shell lets you redirect stdout and stderr independently:
+The shell redirects fd 1 and fd 2 independently:
 
 ```bash
 node app.js > output.txt 2> errors.txt
@@ -213,13 +221,13 @@ node app.js > output.txt 2>&1  # merge stderr into stdout
 node app.js 2>/dev/null        # discard errors
 ```
 
-Your Node program doesn't need to know about any of this. The OS handles the redirection before your process even starts. By the time Node opens fd 1 and fd 2, they already point wherever the shell told them to. The redirection happens at the `fork()`/`exec()` level - the shell opens the target files, uses `dup2()` to replace fd 1 or fd 2 with the new file descriptors, then executes your program. Your process inherits the redirected fds as if they were always there.
+Your program receives the final fd table. The shell does the setup before Node starts: it opens target files, calls `dup2()` to replace fd 1 or fd 2, then executes the Node binary. By the time JavaScript runs, `process.stdout` and `process.stderr` wrap whatever descriptors the shell left in place.
 
-The `2>&1` syntax deserves a note. It means "redirect fd 2 to wherever fd 1 currently points." Order matters: `node app.js > out.txt 2>&1` sends both to `out.txt`. But `node app.js 2>&1 > out.txt` sends stderr to the terminal (wherever fd 1 pointed before the `>` redirect) and stdout to the file. Shell redirection is evaluated left to right.
+`2>&1` copies fd 1's current target into fd 2. Order matters because shells process redirections left to right. `node app.js > out.txt 2>&1` sends both streams to `out.txt`. `node app.js 2>&1 > out.txt` sends stderr to the original stdout target and stdout to the file.
 
 ## TTY detection
 
-`process.stdout.isTTY` is `true` when stdout is connected to a terminal. When piped or redirected, it's `undefined` (the property simply doesn't exist on the object - it's not set to `false`).
+`process.stdout.isTTY` is `true` when stdout is connected to a terminal. For pipes and redirected files, the property reads as `undefined`.
 
 ```js
 if (process.stdout.isTTY) {
@@ -229,30 +237,32 @@ if (process.stdout.isTTY) {
 }
 ```
 
-This pattern shows up in every CLI tool that supports colors. When you're writing to a terminal, ANSI escape codes render as colors. When piped to a file or another program, those escape codes become garbage characters (`^[[31m` appearing literally). So you check `isTTY` and strip the escapes.
+Color-aware CLIs have a branch close to that. ANSI escape bytes render as colors in a terminal. In a file or downstream program, those bytes appear literally, often as `^[[31m`. `isTTY` tells the program whether fd 1 points at a terminal.
 
-The same property exists on all three streams:
+The same idea applies to all three streams:
 
-- `process.stdin.isTTY` - `true` when the user is typing interactively, `undefined` when input is piped
-- `process.stdout.isTTY` - `true` when output goes to a terminal, `undefined` when piped/redirected
-- `process.stderr.isTTY` - `true` when error output goes to a terminal, `undefined` when redirected
+- `process.stdin.isTTY` - `true` when input comes from an interactive terminal, `undefined` when input is piped
+- `process.stdout.isTTY` - `true` when output goes to a terminal, `undefined` when output is piped or redirected
+- `process.stderr.isTTY` - `true` when diagnostic output goes to a terminal, `undefined` when diagnostic output is redirected
 
-Note that each stream's TTY status is independent. `node app.js | cat` sets stdout's `isTTY` to `undefined` but leaves stderr's as `true`. `node app.js 2>/dev/null` does the opposite. Only a full terminal session has all three connected to TTYs.
+Each stream has its own TTY status. `node app.js | cat` makes stdout non-TTY while stderr can still be a TTY. `node app.js 2>/dev/null` changes stderr and leaves stdout alone.
+
+That independence matters for color decisions. Many tools disable color on stdout when stdout is piped, but keep colored diagnostics on stderr if stderr still points at a terminal. Treating the whole process as "interactive" or "non-interactive" loses that detail.
 
 ### Color detection
 
-Beyond raw `isTTY`, Node has built-in color detection methods:
+Node also exposes color capability checks on TTY streams:
 
 ```js
 process.stdout.getColorDepth();  // 1, 4, 8, or 24
 process.stdout.hasColors(256);   // true/false
 ```
 
-`getColorDepth()` returns the number of bits of color the terminal supports. 1 means monochrome (2 colors). 4 means 16 colors. 8 means 256 colors. 24 means true color (16 million colors). On a non-TTY, it returns 1.
+`getColorDepth()` returns bits of color support. 1 means monochrome. 4 means 16 colors. 8 means 256 colors. 24 means true color. On non-TTY output, it returns 1.
 
-`hasColors(count)` checks whether the terminal supports at least `count` colors. `hasColors(256)` returns `true` if the terminal can do 256-color output. You can also pass an environment object as the second argument: `hasColors(256, myEnvObject)`, which is useful for testing without modifying `process.env`.
+`hasColors(count)` checks whether the terminal supports at least that many colors. You can pass an environment object as the second argument, such as `hasColors(256, myEnvObject)`, which makes tests easier because they can simulate `TERM`, `NO_COLOR`, or `FORCE_COLOR`.
 
-These methods check several environment variables: `COLORTERM` (often set to `truecolor` or `24bit`), `TERM` (e.g., `xterm-256color`), `NO_COLOR`, `FORCE_COLOR`. The `NO_COLOR` convention (`NO_COLOR=1`) tells programs to suppress color output entirely. It's a cross-language standard - see no-color.org. `FORCE_COLOR` overrides `isTTY` and forces color output even when piped - useful for CI systems where you want colored output in log files.
+Node checks environment conventions here: `COLORTERM`, `TERM`, `NO_COLOR`, and `FORCE_COLOR`. `NO_COLOR=1` tells programs to suppress color output. `FORCE_COLOR` asks for color even when output is piped, which CI systems sometimes use for readable logs.
 
 ```js
 if (process.env.NO_COLOR) {
@@ -264,54 +274,40 @@ if (process.env.NO_COLOR) {
 }
 ```
 
-Libraries like `chalk`, `kleur`, and `colorette` do this check internally. They inspect `isTTY`, `NO_COLOR`, `FORCE_COLOR`, and `COLORTERM` to decide whether to emit ANSI sequences or plain text. If you're using one of those libraries, you probably don't need to call `getColorDepth()` yourself.
+Libraries such as `chalk`, `kleur`, and `colorette` perform this detection internally. Application code usually calls the library and lets it decide whether to emit ANSI sequences.
 
 ## Blocking vs Non-Blocking Writes
 
-Here's where stdin, stdout, and stderr get genuinely confusing. The blocking behavior of these streams depends on what they're connected to. And it's different on Linux, macOS, and Windows.
+stdin, stdout, and stderr have connection-dependent blocking behavior. The matrix changes across Linux, macOS, and Windows.
 
-### Three connection types, three behaviors
+TTY first. On Linux and macOS, writes to `process.stdout` and `process.stderr` are synchronous when the stream is connected to a terminal. The `write()` call blocks the event loop until the kernel accepts the bytes for the terminal driver. On Windows, TTY writes are asynchronous because libuv routes them through the Windows console path.
 
-**Connected to a TTY (terminal):**
+Pipes flip part of the matrix. On POSIX platforms, pipe writes are asynchronous. Data enters a Node/libuv write path, then the kernel pipe buffer. A slow consumer fills that buffer and backpressure moves back into the Writable stream. The kernel pipe buffer is commonly 64KB on Linux and 16KB on macOS, though kernel versions and settings can change the exact number. On Windows, pipe-backed standard stream writes are synchronous.
 
-On Linux and macOS, writes to `process.stdout` and `process.stderr` are synchronous. The `write()` call blocks the event loop until the bytes are flushed to the terminal driver. On Windows, writes to a TTY are asynchronous - the Windows console API works differently, and libuv uses async writes through its own abstraction layer.
+Files are simpler. Redirect stdout to a file with `node script.js > output.txt`, and writes are synchronous on supported platforms. The syscall returns after the kernel accepts the bytes into the file path. The kernel may flush to physical storage later.
 
-**Connected to a pipe (e.g., `node script.js | cat`):**
+Put together: TTY writes are synchronous on POSIX and asynchronous on Windows. Pipe writes are asynchronous on POSIX and synchronous on Windows. File writes are synchronous across supported platforms.
 
-Writes are asynchronous on POSIX platforms (Linux, macOS) and synchronous on Windows. On POSIX, the data goes into an internal buffer. If the pipe consumer (the program on the other end) reads slowly, the buffer fills up, and backpressure kicks in. The kernel's pipe buffer is typically 64KB on Linux and 16KB on macOS, so backpressure can start quickly with high-volume output.
+One extra detail: the callback passed to `.write()` means Node finished processing that chunk through the stream write path. For a pipe, that means libuv completed the async write request. For a Unix TTY, it can run after the blocking syscall returns in the same turn. Same API. Different timing.
 
-**Connected to a file (e.g., `node script.js > output.txt`):**
+The behavior comes from libuv (covered in Chapter 1). When fd 1 or fd 2 is a TTY, libuv uses `uv_tty_t`. On Unix, that path writes directly with blocking `write(2)` calls. Terminal output is usually small, so the blocking path avoids queue setup for writes that normally complete during the syscall. When the fd is a pipe, libuv uses `uv_pipe_t`, which participates in the event loop and owns an async write queue. Pipe output can stall for longer because the reader controls how fast the kernel buffer drains. Regular files use synchronous writes because thread-pool file I/O could complete out of order.
 
-Writes are synchronous on all platforms. The `write()` call blocks until the data is written to the file's kernel buffer (which the kernel will eventually flush to disk asynchronously).
+That last bit matters. Two stdout writes should preserve insertion order. If Node sent redirected file writes through the libuv thread pool (covered in Chapter 1), worker scheduling could let write 2 finish before write 1. Synchronous writes preserve output order at the cost of blocking the main thread when the file target is slow.
 
-Here's that in table form:
+Slow files are real. Redirecting to a network mount, a nearly full disk, or a busy filesystem can make a stdout write block long enough to show up in latency. Most CLI tools accept that cost. A server process that logs heavily to a slow redirected stdout should measure it instead of assuming logging is free.
 
-| Connected to | stdout/stderr behavior | Platform note |
-|-------|-----------|--------|
-| TTY | Synchronous (blocking) | Async on Windows |
-| Pipe | Asynchronous (non-blocking) | Sync on Windows |
-| File | Synchronous (blocking) | All platforms |
-
-### Why the inconsistency
-
-The behavior comes from libuv (covered in Chapter 1), the C library underneath Node. When libuv detects that fd 1 or fd 2 is a TTY, it uses `uv_tty_t` handles. TTY writes on Unix go through a blocking `write(2)` syscall - there's no async TTY writing in libuv on Unix. When it detects a pipe, libuv uses `uv_pipe_t` handles, which are fully asynchronous with their own event-loop-driven write queue. When it detects a regular file, libuv uses synchronous writes because file I/O on the thread pool (covered in Chapter 1) would reorder writes.
-
-The underlying reason for the inconsistency is pragmatic. Terminal output is typically small and fast - a human reading text at a terminal doesn't generate backpressure. The write completes in microseconds. Making it async would add event loop overhead (registering writability interest, handling the write callback, scheduling the next write) for output that finishes instantly anyway. Pipe output can genuinely block - the kernel pipe buffer is finite, and a slow consumer creates real backpressure. Async handling is necessary there. File output blocks in the kernel for data consistency, and using the thread pool would let writes complete out of order.
-
-### The process.exit() data loss problem
+### process.exit() and buffered output
 
 ```js
 process.stdout.write('results\n');
 process.exit(0);
 ```
 
-When stdout is a TTY: safe. The write is synchronous. By the time `process.exit()` runs, the data is already on the screen.
+TTY stdout on Unix flushes before `process.exit()` because the write blocks until the kernel accepts the bytes. Pipe-backed stdout on POSIX can lose the line. `process.stdout.write()` queues the chunk and returns. `process.exit()` terminates the process before the queued write completes.
 
-When stdout is a pipe: dangerous. The write is asynchronous. `process.stdout.write()` puts the data in a buffer and returns immediately. `process.exit()` fires next, terminating the process before the buffer flushes. Your data vanishes.
+I've seen that exact bug in CLIs. Works in a terminal. Loses the last line under `| tee` or a log collector. The bug sits in the connection type, not in the string being written.
 
-I've seen this bug in production more than once. The program works fine during development - you run it in a terminal, the output appears, everything looks correct. Then you deploy it, pipe the output to a log aggregator, and suddenly the last few lines are missing. The writes were async, `process.exit()` ran before the buffer drained, and the data was lost.
-
-The fix:
+Use the write callback when explicit exit is required:
 
 ```js
 process.stdout.write('results\n', () => {
@@ -319,26 +315,24 @@ process.stdout.write('results\n', () => {
 });
 ```
 
-The callback fires after the data is actually flushed. Or, if you're using `console.log()`:
+For `console.log()`, the cleaner answer is usually `process.exitCode`:
 
 ```js
+process.exitCode = 0;
 console.log('results');
-process.stdout.once('drain', () => {
-  process.exit(0);
-});
 ```
 
-But even this has a subtlety. If the write didn't trigger backpressure (the buffer wasn't full), `drain` won't fire because it only fires after a `write()` returned `false`. If you want to force an explicit exit, passing a callback to `.write()` is the safest option.
+Set the exit code. Stop scheduling new work. Let the event loop drain so pending writes can finish. `drain` helps only after a `write()` returns `false`; a small queued pipe write can still have no `drain` event to wait for. The write callback is the precise hook for one chunk.
 
-Or better yet, just use `process.exitCode = 0` and let the event loop drain naturally. Set the exit code, stop starting new work, and let Node exit on its own when everything flushes. No explicit `process.exit()` call needed. This is by far the most reliable way to prevent data loss.
+There is also a subtle console-specific issue. `console.log()` has no per-call completion callback. It formats and writes, then returns. If the process needs to exit after a final message, `process.stdout.write(message, callback)` gives you a concrete completion point. `console.log()` is fine for normal natural exit. It is clumsy for explicit shutdown sequencing.
 
-### stderr is (mostly) blocking
+stderr follows the same connection-type matrix, with a practical convention layered on top. Crash diagnostics usually go to stderr because stderr is often still attached to a TTY, and Unix TTY writes block. Piped stderr can still lose buffered data if `process.exit()` runs before the write completes.
 
-stderr behaves like stdout regarding connection types, but there's a historical convention worth knowing: many programs treat stderr as always-synchronous for safety. If your program is crashing, you want the error message to actually make it to the screen before the process dies. Node follows this convention on Unix when stderr is a TTY - the write blocks. But when stderr is piped, it's async, and the same data-loss-on-exit problem applies.
+That is why fatal-path code should be boring. Write the diagnostic. Prefer synchronous cleanup where the process is already dying. Use `process.exitCode` when the program can finish normally. Reserve `process.exit()` for cases where immediate termination is the actual requirement.
 
 ## The console object
 
-`console` in Node is an instance of the `Console` class, configured with `process.stdout` and `process.stderr`. You can create your own:
+`console` in Node is a `Console` instance wired to `process.stdout` and `process.stderr`.
 
 ```js
 import { Console } from 'node:console';
@@ -348,7 +342,7 @@ const logger = new Console({
 });
 ```
 
-The default `console` does exactly this. Every method on `console` ultimately calls `.write()` on one of those two streams. You can also redirect a custom Console to files:
+The default global console is configured this way. Each method formats arguments, picks stdout or stderr, and writes to that stream. You can wire a custom Console to files:
 
 ```js
 import { createWriteStream } from 'node:fs';
@@ -359,17 +353,9 @@ const log = new Console({
 log.log('this goes to /tmp/app.log');
 ```
 
-The custom Console has all the same methods - `log`, `error`, `table`, `time`, `trace`. They write to whichever streams you passed in the constructor.
+The method split is fixed. `console.log()`, `console.info()`, `console.table()`, `console.count()`, `console.countReset()`, `console.time()`, `console.timeLog()`, `console.timeEnd()`, `console.group()`, and `console.groupEnd()` write to stdout. `console.error()`, `console.warn()`, `console.trace()`, `console.dir()`, and failed `console.assert()` calls write to stderr.
 
-### Which methods write where
-
-stdout methods: `console.log()`, `console.info()`, `console.table()`, `console.count()`, `console.countReset()`, `console.time()`, `console.timeLog()`, `console.timeEnd()`, `console.group()`, `console.groupEnd()`.
-
-stderr methods: `console.error()`, `console.warn()`, `console.trace()`, `console.dir()`, `console.assert()` (when the assertion fails).
-
-`console.log()` and `console.info()` are identical - same implementation, different name. `console.error()` and `console.warn()` are identical too. They call `util.format()` on the arguments and write to the respective stream.
-
-### console.table()
+`console.log()` and `console.info()` share implementation. So do `console.error()` and `console.warn()`. They call `util.format()` and write the result to the selected stream.
 
 ```js
 console.table([
@@ -378,9 +364,9 @@ console.table([
 ]);
 ```
 
-Prints a formatted ASCII table to stdout. It inspects the array of objects, extracts the column headers from the keys, and pads everything to align. You can pass a second argument to select specific columns: `console.table(data, ['name'])`. It goes to stdout, so it shows up in pipes. If you're building a CLI tool that outputs structured data, be aware that `console.table()` output isn't machine-parseable - it's for human eyes. Pipe-friendly tools should output JSON or CSV instead.
+`console.table()` prints a formatted ASCII table to stdout. It inspects the objects, extracts column names from keys, and pads cells to align. A second argument selects columns: `console.table(data, ['name'])`. The output targets people. Pipe-friendly tools should emit JSON, NDJSON, or CSV.
 
-### console.time() and console.timeEnd()
+Because the table goes to stdout, it will be captured by shell redirection. That is fine for human-readable reports. It is a poor default for APIs between programs because spacing, truncation, and object inspection rules are presentation details.
 
 ```js
 console.time('query');
@@ -388,31 +374,29 @@ await db.query('SELECT * FROM users');
 console.timeEnd('query');  // query: 42.123ms
 ```
 
-`console.time()` starts a high-resolution timer labeled with the string you pass. `console.timeEnd()` stops it and prints the elapsed time in milliseconds to stdout. `console.timeLog()` prints the elapsed time without stopping the timer - useful for tracking incremental progress within a long operation. Internally, these use `performance.now()`, so they have sub-millisecond precision.
+`console.time()` starts a high-resolution timer under the label you pass. `console.timeEnd()` stops it and writes elapsed milliseconds to stdout. `console.timeLog()` writes elapsed time without stopping the timer. Multiple labels can run at once. A missing label warning goes to stderr.
 
-You can have multiple named timers running simultaneously. Each label is independent. Calling `console.timeEnd()` with a label that doesn't exist prints a warning to stderr.
-
-### console.trace()
+Internally, the timing path uses a high-resolution clock, so the value can include fractional milliseconds. The output still goes through the same stdout path as `console.log()`. In a pipeline, timing lines become part of the data stream unless you use a custom `Console` that sends timing output to stderr.
 
 ```js
 console.trace('checkpoint');
 ```
 
-Prints `Trace: checkpoint` followed by a stack trace to stderr. It doesn't throw an error. It doesn't stop execution. It just dumps the current call stack as diagnostic output. Useful for tracking down where a function is being called from without setting breakpoints. The output includes the full call chain with file names and line numbers, just like an Error stack trace but without the Error.
+`console.trace()` writes `Trace: checkpoint` plus the current stack trace to stderr and keeps the program running. It uses the same file and line formatting you see in Error stacks.
+
+That makes it useful for temporary diagnostics in a CLI pipeline. The transformed data keeps moving through stdout, while stack information lands on stderr where the next program in the pipe will not parse it as data.
 
 ## Piping patterns
 
-The Unix philosophy: small programs that do one thing, composed via pipes. Node fits into this model through stdin and stdout.
-
-The simplest pipe-through program:
+Node fits Unix-style pipelines through stdin and stdout.
 
 ```js
 process.stdin.pipe(process.stdout);
 ```
 
-Reads everything from stdin, writes it to stdout. That's `cat` implemented in one line. stdin is a Readable, stdout is a Writable, and `.pipe()` (covered in Chapter 3) connects them with automatic backpressure handling.
+That reads fd 0 and writes fd 1. stdin is a Readable, stdout is a Writable, and `.pipe()` (covered in Chapter 3) connects them with backpressure handling.
 
-A filter that transforms each line:
+A line filter starts with readline:
 
 ```js
 import { createInterface } from 'node:readline';
@@ -422,34 +406,35 @@ for await (const line of rl) {
 }
 ```
 
-You'd use this as `cat file.txt | node upper.js | head -5`. stdin comes from `cat`, stdout goes to `head`. stderr remains connected to the terminal for any error messages.
+Run it as `cat file.txt | node upper.js | head -5`. stdin comes from `cat`. stdout goes to `head`. stderr remains available for diagnostics.
 
-### Building a proper CLI filter
-
-A slightly more realistic example - a JSON line filter:
+A JSONL filter keeps good output and bad input separate:
 
 ```js
 import { createInterface } from 'node:readline';
 const rl = createInterface({ input: process.stdin });
+```
+
+That creates a line iterator over fd 0. The loop does the filtering:
+
+```js
 for await (const line of rl) {
   try {
     const obj = JSON.parse(line);
-    if (obj.level === 'error') {
-      process.stdout.write(line + '\n');
-    }
+    if (obj.level === 'error') process.stdout.write(`${line}\n`);
   } catch {
     process.stderr.write(`invalid JSON: ${line}\n`);
   }
 }
 ```
 
-Good output goes to stdout. Bad input errors go to stderr. The calling shell can redirect them independently. If someone runs `node filter.js < logs.jsonl > errors.jsonl 2> parse-failures.txt`, they get clean separation of output and diagnostics.
+Valid matching records go to stdout. Parse failures go to stderr. With `node filter.js < logs.jsonl > errors.jsonl 2> parse-failures.txt`, the caller gets clean data in one file and diagnostics in another.
 
-The `try/catch` around `JSON.parse()` matters here. In a pipeline, one malformed line shouldn't crash the whole filter. Write the error to stderr, skip the line, keep processing. That's how well-behaved Unix filters work.
+The `try/catch` keeps the pipeline alive after malformed input. Report the bad line. Skip it. Keep reading.
 
-### Handling stdin end
+One more detail: `process.stdout.write()` inside that loop can return `false`. For small log filters, ignoring it may be acceptable. For high-volume filters, pause the input path or use a Transform plus `pipeline()` so backpressure travels through the whole chain.
 
-When stdin is piped, it has a finite length. The `end` event (covered in Chapter 3) fires when all input has been consumed:
+When stdin is piped, it ends when the upstream writer closes:
 
 ```js
 let total = 0;
@@ -461,13 +446,13 @@ process.stdin.on('end', () => {
 });
 ```
 
-When stdin is a TTY, `end` fires when the user signals EOF with Ctrl+D. Your program should handle both cases identically - the stream abstraction takes care of the difference.
+TTY stdin ends when the user sends EOF. Code can handle both cases through the same `end` event (covered in Chapter 3).
 
-A detail worth noting: in a pipeline like `node producer.js | node consumer.js`, if the producer exits, the pipe closes, and consumer's stdin gets `end`. But if the consumer exits first, the producer gets SIGPIPE (or an EPIPE error on its stdout). The two directions of failure are asymmetric.
+Pipeline shutdown has direction. In `node producer.js | node consumer.js`, producer exit closes the pipe and consumer stdin emits `end`. Consumer exit closes the read side, and the producer sees SIGPIPE or an `EPIPE` error on stdout. Those two failure directions surface differently.
 
-### Transform with pipeline()
+That asymmetry is normal for Unix pipes. Upstream completion is data EOF. Downstream completion is a broken output target. Good CLI programs treat the first as completion and the second as a clean early stop when the downstream command intentionally quits.
 
-For more structured transformations, you can use `pipeline()` (covered in Chapter 3) with a Transform stream:
+For stream transformations, `pipeline()` (covered in Chapter 3) gives you error propagation and cleanup:
 
 ```js
 import { pipeline } from 'node:stream/promises';
@@ -481,64 +466,47 @@ const upper = new Transform({
 await pipeline(process.stdin, upper, process.stdout);
 ```
 
-`pipeline()` handles error propagation and cleanup. If any stream in the chain errors or closes, the others are cleaned up properly. The `for-await-of` approach from earlier is simpler for line-by-line work, but `pipeline()` with Transform streams gives you proper backpressure end-to-end.
+The line-by-line version is smaller for text filters. `pipeline()` is the better fit when the transformation is naturally stream-shaped and you want backpressure end to end.
 
 ## How Node bootstraps stdin, stdout, and stderr
 
-When the Node process starts, before your script runs, the runtime sets up the three standard streams. The logic lives in `lib/internal/bootstrap/switches/is_main_thread.js` (and a separate path for worker threads, which don't get real standard streams).
+Before user code runs, Node installs lazy getters for the standard streams on `process`. The main-thread path lives in `lib/internal/bootstrap/switches/is_main_thread.js`; worker threads use a separate path for proxied stdout and stderr.
 
-### The bootstrap sequence
+Access triggers creation. The first `process.stdout` read calls an internal `getStdout()` function. That function calls `createWritableStdioStream(1)`. From there, Node calls `guessHandleType(fd)`, which crosses into the C++ binding for `process.binding('uv').guessHandleType(fd)`, which calls libuv's `uv_guess_handle(fd)`.
 
-Node lazily initializes `process.stdin`, `process.stdout`, and `process.stderr` using getters on the `process` object. The first time you access `process.stdout`, the getter fires and creates the actual stream. Here's the rough sequence:
+`uv_guess_handle()` runs `fstat()` on the fd and checks terminal status with `isatty(fd)` on Unix. It returns a libuv handle type: `UV_TTY`, `UV_NAMED_PIPE`, `UV_FILE`, or `UV_UNKNOWN`. Node uses that result to decide which JavaScript stream object to create.
 
-1. Node calls `getStdout()` (an internal function).
-2. `getStdout()` calls `createWritableStdioStream(1)` - fd 1.
-3. `createWritableStdioStream()` calls `guessHandleType(fd)` to figure out what fd 1 is connected to.
-4. `guessHandleType()` calls the C++ binding `process.binding('uv').guessHandleType(fd)`, which calls libuv's `uv_guess_handle(fd)`.
-5. `uv_guess_handle()` runs an `fstat()` on the fd and checks whether it's a TTY (using `isatty(fd)` on Unix), a pipe, a regular file, or something else.
-6. Based on the result, Node creates different stream types.
+The writable path has a small but meaningful chain. `getStdout()` handles caching so repeated `process.stdout` reads return the same object. `createWritableStdioStream(1)` classifies fd 1. The classification chooses the constructor and write policy. After that, the resulting stream is stored on the process object and reused. `process.stderr` follows the same path with fd 2. stdin follows a sibling readable path with fd 0.
 
-The lazy initialization is deliberate. If your program never reads `process.stdin`, the underlying libuv handle is never created. The getter remains dormant. For short-lived scripts that don't need stdin, this avoids creating a handle that would need to be closed during shutdown.
+The lazy part matters. A script that writes to stdout and never touches stdin leaves the stdin handle uncreated. That avoids creating a libuv handle that would need lifetime management during shutdown.
 
-### Handle type detection
+`UV_TTY` means fd 1 or fd 2 points at a terminal. Node creates a `TTYWrap` around libuv's `uv_tty_t`, then exposes it as a `net.Socket` in TTY mode. The handle stores the fd, the original terminal mode for restoration on exit, and window size data fetched with `ioctl(fd, TIOCGWINSZ, &winsize)`. That is where `columns`, `rows`, `setRawMode()`, and color-capability helpers come from.
 
-`uv_guess_handle()` returns one of several constants:
+The JavaScript object with a socket-shaped API comes from Node's stream stack. TTY streams need duplex-ish behavior for stdin and stream-compatible writes for stdout and stderr, so Node reuses the socket-shaped wrapper around native handles. The fd still points at a terminal device. Socket methods that require a peer address have little useful information to return.
 
-- `UV_TTY` - fd is connected to a terminal. Node creates a `TTYWrap` handle internally, which wraps a `uv_tty_t` struct in libuv. The resulting JavaScript object is a `net.Socket` in a special TTY mode, with extra methods like `setRawMode()`, `getColorDepth()`, and properties like `columns` and `rows`. The `uv_tty_t` struct contains the fd, the terminal's original mode (saved at init so it can be restored on exit), and window size information obtained via `ioctl(fd, TIOCGWINSZ, &winsize)`.
+`UV_NAMED_PIPE` means fd 1 or fd 2 points at a pipe or Unix domain socket. Node creates a pipe handle around `uv_pipe_t` and exposes a `net.Socket` in pipe mode. Writes enter libuv's write queue as `uv_write_t` requests. libuv registers interest in fd writability through epoll on Linux or kqueue on macOS. When the kernel says the pipe can accept bytes, libuv writes. If the kernel pipe buffer is full, the request stays queued and Node's stream buffer eventually reports backpressure through `write() === false`.
 
-- `UV_NAMED_PIPE` - fd is connected to a pipe (including Unix domain sockets). Node creates a `Pipe` handle wrapping `uv_pipe_t`. The JavaScript object is a `net.Socket` operating in pipe mode. Pipes are fully asynchronous - libuv registers the fd with epoll (Linux) or kqueue (macOS) for writability notifications and manages an internal write queue.
+That path is why pipe-backed stdout can keep the process alive after your synchronous JavaScript has finished. Pending `uv_write_t` requests are active work. The event loop keeps running until those requests complete or fail. Calling `process.exit()` bypasses that drainage. Natural exit lets it happen.
 
-- `UV_FILE` - fd is a regular file. Node creates an `fs.WriteStream` (for stdout/stderr) or `fs.ReadStream` (for stdin). File streams for standard I/O are special-cased to use synchronous `fs.writeSync()` calls.
+`UV_FILE` means the fd points at a regular file. Node creates an `fs.WriteStream` for stdout or stderr, or an `fs.ReadStream` for stdin. Standard stream writes to files use synchronous `fs.writeSync()` internally. The thread pool path could reorder concurrent writes because worker completion order is scheduler-dependent. Sync writes preserve textual order.
 
-- `UV_UNKNOWN` - libuv can't determine the handle type. Node falls back to a `net.Socket` as a last resort.
+Regular files also explain why redirected stdout can be slower than terminal output. On a local SSD, synchronous writes into the kernel page cache can be cheap. On a remote filesystem, the same call can block longer. The stream API hides that distinction, but latency still lands on the JavaScript thread.
 
-The distinction between `uv_tty_t` and `uv_pipe_t` is where the blocking behavior originates. In libuv, `uv_tty_t` on Unix uses blocking `write(2)` syscalls directly. There's a reason for this: terminal output is expected to be low-volume and low-latency. A blocking write to the terminal completes in microseconds under normal conditions, and making it asynchronous would add complexity (event loop integration, write queue management) for no practical benefit. The write just goes straight to the kernel's TTY driver.
+`UV_UNKNOWN` is the fallback. Node creates a socket wrapper as the least-bad option for an fd libuv cannot classify. That path is rare for normal shells, but it matters for embedded runtimes, unusual supervisors, and test harnesses that hand Node custom descriptors. The fallback keeps the standard stream API present while still surfacing write errors through the stream.
 
-`uv_pipe_t` is fully integrated with the event loop. Writes go through libuv's standard write queue (`uv__write()`). When you call `process.stdout.write()` on a pipe-connected stdout, libuv enqueues the data in a `uv_write_t` request, registers interest in the fd being writable (via epoll/kqueue), and writes when the event loop gets to it. If the pipe's kernel buffer is full (the consumer isn't reading fast enough), the write stays queued and backpressure propagates up through the Node stream's internal buffer into your code as a `false` return from `.write()`.
+stdin uses the same detection path with Readable stream creation. TTY stdin gets a TTY-capable socket wrapper. Pipe stdin gets a pipe-backed socket. File stdin, such as `node script.js < input.txt`, gets an `fs.ReadStream`.
 
-### The file case
+The file case for stdin is common in batch tools. `node parse.js < input.ndjson` gives your program an `fs.ReadStream` over fd 0. The JavaScript code can still consume `process.stdin` with `for await`, `data`, or `pipe()`. The source changed from a terminal to a file descriptor backed by a regular file; the consumer code sees a Readable.
 
-When stdout or stderr is redirected to a file (`node script.js > out.txt`), `uv_guess_handle()` returns `UV_FILE`. Node creates an `fs.WriteStream`. But here's the thing - `fs.WriteStream` for standard streams is special-cased. It uses synchronous `fs.writeSync()` calls internally, bypassing the thread pool entirely. The reason: if file writes went through the libuv thread pool, write ordering wouldn't be guaranteed. Two consecutive `process.stdout.write()` calls might complete in any order depending on which thread pool worker picks them up first, garbling your output. Synchronous writes maintain insertion order.
+TTY stdin has one extra path: terminal-generated Ctrl+C. In cooked mode, the terminal driver turns Ctrl+C into SIGINT. In raw mode, the byte `0x03` reaches JavaScript. Switching between those modes requires saving and restoring terminal attributes with `tcsetattr()`, and libuv's TTY code coordinates that state with Node's signal behavior.
 
-The cost is that a very slow filesystem (a network mount, a full disk, an overloaded SSD) will block the event loop on stdout writes. For most programs writing human-readable output, this is irrelevant. For programs dumping gigabytes to stdout redirected to a slow NFS mount - it could matter. The event loop stalls on each `write()` syscall until the kernel accepts the data.
+Worker threads receive proxied standard output. `process.stdout` and `process.stderr` in a worker send data to the parent thread over an internal channel, and the parent writes to its own fd 1 or fd 2. That makes worker stdout and stderr asynchronous. `process.stdin` in a worker is `null`; input has to arrive through messages from the main thread.
 
-### stdin bootstrap
-
-stdin follows a similar path but creates Readable streams instead of Writable ones. When fd 0 is a TTY, Node creates a `net.Socket` with TTY capabilities - the same `uv_tty_t` based wrapper with `setRawMode()` and `isTTY`. When it's a pipe, it creates a pipe-backed `net.Socket`. When it's a file (rare, but possible with `node script.js < input.txt`), it creates an `fs.ReadStream`.
-
-One special case: if stdin is a TTY, Node also sets up signal handling for Ctrl+C (SIGINT) through the TTY layer. In raw mode, this signal handling is disabled - as mentioned earlier, you get the raw byte `0x03` instead of SIGINT. The TTY layer has to cooperate with libuv's signal handling code to make this work correctly, and switching between raw and cooked mode involves saving and restoring terminal attributes via `tcsetattr()`.
-
-### Worker threads
-
-Worker threads don't inherit the parent's standard streams directly. `process.stdout` and `process.stderr` in a worker are redirected to the parent thread via an internal communication channel. The parent thread then writes to its own stdout/stderr. Worker thread stdout/stderr is always asynchronous - the data travels through a MessagePort to the main thread before hitting the actual fd.
-
-`process.stdin` in a worker is null. Workers can't read from the terminal. If a worker needs input from the user, it has to request it from the main thread via messaging.
+That worker behavior can affect test output. A worker's `console.log()` call travels through the parent before hitting the real stdout. Ordering against parent-thread logs depends on message delivery, stream state, and the parent write path. For exact ordering, send structured messages to the parent and let one thread own the final output.
 
 ## Edge cases and gotchas
 
-### stdout as a net.Socket
-
-When stdout is a TTY, `process.stdout` is actually a `net.Socket` instance:
+TTY stdout is a `net.Socket` instance:
 
 ```js
 const net = require('net');
@@ -546,11 +514,9 @@ console.log(process.stdout instanceof net.Socket);
 // true (when connected to a TTY)
 ```
 
-It has `net.Socket` methods - `.address()`, `.remoteAddress`, `.setKeepAlive()`, etc. Most of them return meaningless values or throw, since the "socket" is really a TTY device. But it also means `process.stdout` emits `error` events if something goes wrong with the underlying fd, and you need to handle those errors to prevent uncaught exceptions.
+Some inherited socket methods make little sense on a terminal fd. The useful detail is error behavior: stdout can emit `error` if the underlying fd write fails.
 
-### The EPIPE error
-
-When your program writes to stdout and the pipe consumer has already exited (e.g., `node app.js | head -1` - head exits after one line), the next write triggers SIGPIPE. Node catches this and emits an `error` event with code `EPIPE` on `process.stdout`. If you don't handle the error event, the process crashes with an unhandled error.
+Broken pipes are the common case. Run `node app.js | head -1`, and `head` exits after one line. The next stdout write in your program hits a closed read side. Node ignores SIGPIPE at startup and turns the failed write into an `EPIPE` error on `process.stdout`.
 
 ```js
 process.stdout.on('error', (err) => {
@@ -560,11 +526,11 @@ process.stdout.on('error', (err) => {
 });
 ```
 
-Any program designed to be piped should handle EPIPE. Without the handler, `node generate-logs.js | head -5` crashes after head reads its five lines and closes the pipe. With the handler, your program exits cleanly. Most CLI frameworks handle this automatically, but if you're building a raw Node script that might be piped, add the handler.
+Any program intended for pipelines should handle `EPIPE`. The handler turns early consumer exit into normal completion instead of an uncaught stream error.
 
-### Mixed sync/async writes
+`head` is the usual repro because it exits intentionally after receiving enough lines. The producer did nothing wrong. The consumer closed the pipe on purpose. Treating `EPIPE` as success keeps shell pipelines quiet.
 
-Because stdout can be sync (TTY, file) or async (pipe), code that mixes `process.stdout.write()` with other async operations can produce surprising output ordering.
+Mixed sync and async writes can surprise you:
 
 ```js
 process.stdout.write('A');
@@ -572,43 +538,24 @@ setTimeout(() => process.stdout.write('B'), 0);
 process.stdout.write('C');
 ```
 
-On a TTY: you see `ACB`. Both sync writes complete immediately, then the timer fires.
+On a TTY, `A` and `C` write synchronously, then the timer writes `B`, so output is `ACB`. On a pipe, `A` and `C` usually queue before the timer phase, so the output is still `ACB`. With enough data and backpressure, timing can become more visible, but JavaScript call order still determines queue order until you yield to the event loop.
 
-On a pipe: you still see `ACB` most of the time, because both `write('A')` and `write('C')` queue in order before the event loop advances to the timer phase. But with enough data to trigger backpressure, the ordering could shift. The key insight: even on a pipe, synchronous JavaScript execution order is preserved in the write queue. The writes go into libuv's queue in the order you call them. Reordering only happens if you yield to the event loop between writes and backpressure intervenes.
+`console.log()` can block. It writes to stdout, and stdout can be synchronous. Heavy terminal logging can dominate a benchmark. Pipe to `/dev/null` or redirect to a file when you want to measure application work without terminal write latency.
 
-### console.log() is synchronous (sometimes)
+There is a second benchmarking trap: redirecting stdout to a regular file can also be synchronous. `/dev/null` usually removes most cost because the kernel discards the bytes quickly. A real file on a slow device measures the filesystem too.
 
-Because `console.log()` writes to `process.stdout`, and stdout can be synchronous when connected to a TTY, `console.log()` can block the event loop. A program that logs heavily to a terminal will run slower than one that pipes to `/dev/null`. I've seen Node applications where switching from terminal output to piped output improved throughput by 10-20%, purely because the synchronous TTY writes were blocking the event loop between each write.
+`isTTY` gives one bit of classification. Pipes and redirected files both read as `undefined`. If code truly needs to distinguish them, `fs.fstatSync(1)` can inspect fd 1 and report whether it points at a pipe, character device, or regular file. Most CLIs only need the TTY branch.
 
-If you're benchmarking a Node program, make sure your measurement isn't affected by stdout blocking. Pipe to `/dev/null` or redirect to a file to remove TTY write latency from your numbers.
+That deeper detection belongs in tools with different file and pipe behavior. A program might choose seek-friendly output when fd 1 is a regular file, but stream records when fd 1 is a pipe. Most programs skip that branch because stdout is a destination, not a random-access file API, even when the descriptor points at a file.
 
-### Detecting the connection type
-
-You can combine `isTTY` with other checks:
-
-```js
-const isTTY = process.stdout.isTTY;
-const columns = process.stdout.columns || 80;
-
-if (isTTY) {
-  // interactive: colors, progress bars, cursor movement
-} else {
-  // piped: plain text, machine-parseable output
-}
-```
-
-There's no built-in property to distinguish piped from redirected-to-file. Both show `isTTY` as `undefined`. If you need that distinction, you'd have to use `fs.fstatSync(1)` and check whether the fd points to a pipe or a regular file - but that level of detection is rarely necessary.
-
-### The write buffer and exit
-
-One more subtlety about process exit. When you call `process.exit()`, Node runs `process.on('exit')` handlers synchronously, then terminates. It doesn't wait for pending async writes. If `process.stdout` is backed by a pipe, any data in the write buffer is lost.
-
-`process.exitCode = N` is the safe alternative. Set the exit code, stop doing work, and let the event loop drain. Node will flush the write buffers before exiting naturally when there's nothing left to process.
+Process exit is the last trap. `process.exit()` runs `exit` handlers synchronously and terminates. Pending async writes stay pending forever. `process.exitCode = N` is the safer control point:
 
 ```js
 process.exitCode = 1;
 console.error('something went wrong');
-// don't call process.exit() - let it drain
+// let the event loop drain
 ```
 
-In cases where you must exit immediately (catastrophic error, signal handler), accept that piped stdout data might be truncated. Send diagnostic info to stderr (which may be synchronous if it's a TTY), and let the process die. That's the tradeoff. Fast exit vs complete output. For most programs, letting the event loop drain is the right call.
+Set the code. Stop creating new work. Let the loop empty. That gives pipe-backed stdout and stderr a chance to flush before the process disappears.
+
+Standard streams look small from JavaScript, but they carry the process boundary with them. The shell decides the descriptors. Node wraps them lazily. libuv picks the handle type. Your code only sees a stream, and the stream's behavior comes from that whole setup.
