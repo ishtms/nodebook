@@ -1,9 +1,9 @@
 # NodeBook
 
-![NodeBook Cover](/public/nodebook_cover.jpg)
-
 > [!TIP]
 > For better experience, I'd recommend reading it on the [NodeBook Website](https://thenodebook.com) or if you prefer getting the slides and reading an e-book version (ePUB and PDF - both dark/light) you can download the digital bundle here: [NodeBook Digital Bundle](https://thenodebook.com/get)
+
+![NodeBook Cover](/public/nodebook_cover.jpg)
 
 NodeBook is my my way of explaining everything about Server side developement using Node.js, it's internals and the parts that matter when apps misbehave.
 
